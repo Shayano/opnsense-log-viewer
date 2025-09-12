@@ -1,6 +1,7 @@
 # OPNsense Log Viewer
 
-Advanced GUI application for analyzing OPNsense firewall logs with powerful filtering capabilities.
+Advanced GUI application for analyzing OPNsense firewall logs with powerful filtering capabilities.  
+Load log files exported from **OPNsense → Firewall → Log Files → Plain View** for advanced filtering and analysis.
 
 <img width="1079" height="816" alt="image" src="https://github.com/user-attachments/assets/ed929b0d-105e-4ba8-b43b-17d9571b08f4" />
 
