@@ -19,13 +19,14 @@ def build_executable():
         '--name=OPNsense_Log_Viewer',
         '--onefile',  # Single executable file (all-in-one)
         '--windowed',  # GUI application (no console)
-        '--icon=icon/icon32.ico',
-        '--add-data=icon;icon',  # Include icon folder
+        '--icon=icon/icon64.ico',  # Use larger icon for better visibility
+        '--add-data=icon;icon',  # Include icon folder in the executable
         '--noconfirm',  # Overwrite without asking
         '--clean',  # Clean cache
         '--optimize=2',  # Optimize bytecode
         '--hidden-import=multiprocessing',  # Ensure multiprocessing works
         '--hidden-import=concurrent.futures',  # Ensure futures work
+        '--collect-data=tkinter',  # Ensure Tkinter resources are included
     ]
     
     print("Starting executable build...")
