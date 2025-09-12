@@ -20,7 +20,7 @@ Load log files exported from **OPNsense → Firewall → Log Files → Plain Vie
 ## Quick Start
 
 ### Option 1: Portable Executable (Recommended)
-1. Download `OPNsense_Log_Viewer.exe` from the `dist/` folder
+1. Download `OPNsense_Log_Viewer.exe` from the release
 2. Double-click to run - no installation required
 
 ### Option 2: Run from Source
@@ -78,19 +78,10 @@ For automatic interface renaming, provide XML configuration:
 </interfaces>
 ```
 
-## Performance
-
-- **Memory efficient**: Chunk-based loading with LRU cache
-- **Parallel processing**: Multi-core filtering for large files
-- **Unlimited file size**: No restrictions on log file size
-- **Optimized display**: Pagination for smooth navigation
-
 ## Troubleshooting
 
-**Application won't start**: Ensure you have the executable or Python 3.7+  
-**Logs won't load**: Check file contains `filterlog` entries  
-**Slow performance**: Use filters to reduce dataset size  
 **Missing interfaces**: Load XML configuration file
+**Missing Labels**: Connect with the SSH Connection
 
 ## License
 
