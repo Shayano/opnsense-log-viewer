@@ -5,6 +5,7 @@ Enhanced multithreading, unlimited file size support, English interface
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import os
+import sys
 import threading
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -66,8 +67,11 @@ class LogViewerApp:
         
         # Set icon if available
         try:
-            self.root.iconbitmap("icon/icon32.ico")
-        except:
+            icon_path = self.get_resource_path("icon/icon64.ico")
+            if os.path.exists(icon_path):
+                self.root.iconbitmap(icon_path)
+        except Exception as e:
+            print(f"Warning: Could not set icon: {e}")
             pass
             
         # Initialize components
@@ -114,6 +118,16 @@ class LogViewerApp:
         self.rule_labels_loaded = False
         
         self.setup_ui()
+    
+    def get_resource_path(self, relative_path):
+        """Get absolute path to resource, works for dev and for PyInstaller"""
+        try:
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            base_path = sys._MEIPASS
+        except Exception:
+            base_path = os.path.abspath(".")
+        
+        return os.path.join(base_path, relative_path)
     
     def _update_pagination_buttons(self):
         """Update pagination button states based on current page"""
