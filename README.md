@@ -2,6 +2,10 @@
 
 Advanced GUI application for analyzing OPNsense firewall logs with powerful filtering capabilities.
 
+<img width="1079" height="816" alt="image" src="https://github.com/user-attachments/assets/ed929b0d-105e-4ba8-b43b-17d9571b08f4" />
+
+
+
 ## Features
 
 - **Modern GUI**: Clean interface with sortable columns and pagination
