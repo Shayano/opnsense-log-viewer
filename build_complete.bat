@@ -55,7 +55,7 @@ if exist *.spec (
 echo.
 echo [4/4] Building single executable...
 echo    Creating all-in-one portable executable...
-python -m PyInstaller --name=OPNsense_Log_Viewer --onefile --windowed --noconfirm --clean --optimize=2 --icon=icon/icon32.ico main_app.py >nul 2>&1
+python -m PyInstaller --name=OPNsense_Log_Viewer --onefile --windowed --noconfirm --clean --optimize=2 --icon=icon/icon64.ico --add-data=icon;icon --collect-data=tkinter main_app.py >nul 2>&1
 if exist "dist\OPNsense_Log_Viewer.exe" (
     echo    OK: Single file executable created
 ) else (
