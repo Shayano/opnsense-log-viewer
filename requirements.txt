@@ -1,0 +1,5 @@
+pandas
+lxml
+pyinstaller
+pyperclip
+paramiko
