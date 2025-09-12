@@ -80,7 +80,7 @@ For automatic interface renaming, provide XML configuration:
 
 ## Troubleshooting
 
-**Missing interfaces**: Load XML configuration file
+**Missing interfaces**: Load XML configuration file  
 **Missing Labels**: Connect with the SSH Connection
 
 ## License
