@@ -71,9 +71,32 @@ Thumbs.db
 *.tmp
 *.temp
 debug_*.py
+logs/
 
 # Application specific
 config.xml
 *.xml
 test_logs/
 temp/
+
+# Build outputs
+dist/
+build/
+*.spec
+
+# Test outputs
+coverage_html/
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Cleanup and archive files
+archive/
+*CLEANUP*.md
+*BACKUP*.md
+backup/
+old_files/
+
+# IDE and tools
+.bmad-core/
+.claude/

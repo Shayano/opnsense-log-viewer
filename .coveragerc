@@ -1,0 +1,51 @@
+# Coverage configuration for OPNsense Log Viewer
+
+[run]
+source = src/opnsense_log_viewer
+branch = True
+parallel = True
+omit =
+    */tests/*
+    */__pycache__/*
+    */site-packages/*
+    */__main__.py
+    */components/log_viewer.py
+    */components/progress_dialog.py
+    */__init__.py
+
+[report]
+precision = 2
+show_missing = True
+skip_covered = False
+sort = Cover
+
+# Fail if coverage is below target
+fail_under = 90
+
+exclude_lines =
+    # Standard pragmas
+    pragma: no cover
+
+    # Debug-only code
+    def __repr__
+    def __str__
+
+    # Non-runnable code
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+
+    # Abstract methods
+    @abstract
+    raise NotImplementedError
+
+    # Defensive programming
+    except ImportError:
+    except Exception:
+    pass
+
+[html]
+directory = coverage_html
+title = OPNsense Log Viewer - Test Coverage Report
+
+[xml]
+output = coverage.xml

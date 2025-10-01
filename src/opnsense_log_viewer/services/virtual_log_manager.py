@@ -8,7 +8,7 @@ from datetime import datetime
 import threading
 from collections import OrderedDict
 
-from log_parser import OPNsenseLogParser, LogEntry
+from opnsense_log_viewer.services.log_parser import OPNsenseLogParser, LogEntry
 
 class LRUCache:
     """Simple LRU cache for log chunks"""
@@ -246,7 +246,7 @@ class VirtualLogManager:
         
         # Use multiprocessing for regular filters
         try:
-            from parallel_filter import ParallelLogFilter
+            from opnsense_log_viewer.services.parallel_filter import ParallelLogFilter
             parallel_filter = ParallelLogFilter()
             self.filtered_indices = parallel_filter.apply_filter_parallel(
                 self, filter_func, progress_callback
@@ -319,7 +319,7 @@ class VirtualLogManager:
             """Processes a batch of lines in a thread"""
             local_indices = []
             # Import locally to avoid conflicts
-            from log_parser import OPNsenseLogParser
+            from opnsense_log_viewer.services.log_parser import OPNsenseLogParser
             local_parser = OPNsenseLogParser()  # Local parser to avoid conflicts
             
             try:

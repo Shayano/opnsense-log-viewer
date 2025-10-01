@@ -9,13 +9,13 @@ def build_executable():
     """Build Windows executable as single file"""
     
     # Check if we are in the correct directory
-    if not os.path.exists('main_app.py'):
-        print("ERROR: main_app.py not found in current directory")
+    if not os.path.exists('src/opnsense_log_viewer/__main__.py'):
+        print("ERROR: src/opnsense_log_viewer/__main__.py not found")
         return False
-    
+
     # Arguments for PyInstaller
     args = [
-        'main_app.py',
+        'src/opnsense_log_viewer/__main__.py',
         '--name=OPNsense_Log_Viewer',
         '--onefile',  # Single executable file (all-in-one)
         '--windowed',  # GUI application (no console)

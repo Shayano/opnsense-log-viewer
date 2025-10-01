@@ -2,7 +2,13 @@
 OPNsense XML configuration parser for interface mapping and firewall rules
 """
 import xml.etree.ElementTree as ET
+import os
 from typing import Dict, Optional
+
+from opnsense_log_viewer.exceptions import FileOperationError, ParseError
+from opnsense_log_viewer.utils.logging_config import get_logger, log_exception
+
+logger = get_logger(__name__)
 
 class OPNsenseConfigParser:
     """OPNsense XML configuration parser"""

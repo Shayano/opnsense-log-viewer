@@ -20,13 +20,13 @@ if errorlevel 1 (
 )
 echo    OK: Python detected
 
-if not exist "main_app.py" (
-    echo    ERROR: main_app.py not found
+if not exist "src\opnsense_log_viewer\__main__.py" (
+    echo    ERROR: src\opnsense_log_viewer\__main__.py not found
     echo    Run this script in the project folder
     pause
     exit /b 1
 )
-echo    OK: Source files present
+echo    OK: Source files present (src/opnsense_log_viewer/)
 
 echo.
 echo [2/4] Dependencies verification/installation...
@@ -55,7 +55,8 @@ if exist *.spec (
 echo.
 echo [4/4] Building single executable...
 echo    Creating all-in-one portable executable...
-python -m PyInstaller --name=OPNsense_Log_Viewer --onefile --windowed --noconfirm --clean --optimize=2 --icon=icon/icon64.ico --add-data=icon;icon --collect-data=tkinter main_app.py >nul 2>&1
+echo    Using new modular source from src/opnsense_log_viewer/
+python -m PyInstaller --name=OPNsense_Log_Viewer --onefile --windowed --noconfirm --clean --optimize=2 --icon=icon/icon64.ico --add-data=icon;icon --collect-data=tkinter --hidden-import=opnsense_log_viewer.components --hidden-import=opnsense_log_viewer.services --hidden-import=opnsense_log_viewer.utils --hidden-import=opnsense_log_viewer.constants --hidden-import=opnsense_log_viewer.exceptions src\opnsense_log_viewer\__main__.py >nul 2>&1
 if exist "dist\OPNsense_Log_Viewer.exe" (
     echo    OK: Single file executable created
 ) else (

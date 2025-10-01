@@ -13,6 +13,11 @@ import socket
 from typing import Dict, Optional, Tuple
 import threading
 
+from opnsense_log_viewer.exceptions import SSHConnectionError
+from opnsense_log_viewer.utils.logging_config import get_logger, log_exception
+
+logger = get_logger(__name__)
+
 
 class OPNsenseSSHClient:
     """SSH client for OPNsense with rule label extraction"""
@@ -62,10 +67,12 @@ class OPNsenseSSHClient:
             self.connected = True
             return True, "SSH connection established successfully"
             
-        except socket.timeout:
-            return False, f"Connection timeout ({timeout}s)"
-        except paramiko.AuthenticationException:
-            return False, "SSH authentication failed (incorrect credentials)"
+        except socket.timeout as e:
+            logger.error(f"SSH connection timeout to {hostname}:{port}")
+            raise SSHConnectionError(f"Connection timeout ({timeout}s)", hostname=hostname, username=username, error_type="timeout", original_error=e)
+        except paramiko.AuthenticationException as e:
+            logger.error(f"SSH authentication failed for {username}@{hostname}")
+            raise SSHConnectionError("SSH authentication failed (incorrect credentials)", hostname=hostname, username=username, error_type="authentication", original_error=e)
         except paramiko.SSHException as e:
             return False, f"SSH error: {str(e)}"
         except Exception as e:
