@@ -1,0 +1,52 @@
+---
+title: Tauri 2.0
+description: The cross-platform app building toolkit
+i18nReady: true
+editUrl: false
+lastUpdated: false
+template: splash
+tableOfContents: false
+prev: false
+next: false
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import Cta from '@fragments/cta.mdx';
+import Hero from '@components/Hero.astro';
+import SponsorList from '@components/sponsors/SponsorList.astro';
+import 'src/styles/home.css';
+
+<Hero
+  tagline="Create small, fast, secure, cross-platform applications"
+  getStarted="Get started"
+  v1Docs="Tauri 1.0 Documentation"
+/>
+
+<div>
+  <Card title="Create a Project" icon="rocket">
+    <Cta />
+  </Card>
+</div>
+
+<CardGrid>
+  <Card title="Frontend Independent" icon="rocket">
+    Bring your existing web stack to Tauri or start that new dream project.
+    Tauri supports any frontend framework so you don't need to change your
+    stack.
+  </Card>
+  <Card title="Cross Platform" icon="rocket">
+    Build your app for Linux, macOS, Windows, Android and iOS - all from a
+    single codebase. Write your frontend in JavaScript, application logic in
+    Rust, and integrate deep into the system with Swift and Kotlin.
+  </Card>
+  <Card title="Maximum Security" icon="rocket">
+    Front-of-mind for the Tauri Team that drives our highest priorities and
+    biggest innovations.
+  </Card>
+  <Card title="Minimal Size" icon="rocket">
+    By using the OS's native web renderer, the size of a Tauri app can be little
+    as 600KB.
+  </Card>
+</CardGrid>
+
+<SponsorList />

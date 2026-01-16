@@ -1,64 +1,42 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
+# Rust / Cargo
+/target/
+src-tauri/target/
+**/*.rs.bk
+Cargo.lock
+
+# Node.js / npm
+node_modules/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+dist-ssr/
+*.local
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
 
-# PyInstaller
-*.manifest
-*.spec
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-cover/
-
-# Virtual environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# IDE
-.vscode/
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
 .idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 *.swp
 *.swo
 *~
 
-# OS
-.DS_Store
+# OS files
 .DS_Store?
 ._*
 .Spotlight-V100
@@ -66,37 +44,38 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
-# Logs and temporary files
-*.log
-*.tmp
-*.temp
-debug_*.py
-logs/
-
-# Application specific
-config.xml
-*.xml
-test_logs/
-temp/
-
 # Build outputs
-dist/
 build/
-*.spec
+*.exe
+*.dmg
+*.app
 
 # Test outputs
-coverage_html/
+coverage/
 .coverage
 htmlcov/
 .pytest_cache/
+coverage_html/
 
-# Cleanup and archive files
+# Temporary files
+*.tmp
+*.temp
+temp/
+nul
+tmpclaude-*
+
+# IDE and tools
+.claude/
+.auto-claude/
+.cursor/
+.bmad-core/
+
+# Archive
+python-legacy/
 archive/
-*CLEANUP*.md
-*BACKUP*.md
 backup/
 old_files/
 
-# IDE and tools
-.bmad-core/
-.claude/
+# Application specific
+config.xml
+test_logs/
