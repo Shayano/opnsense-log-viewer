@@ -16,9 +16,11 @@ High-performance desktop application for investigating OPNsense firewall logs (3
 
 - **Backend**: Tauri v2 + Rust 1.70+
 - **Frontend**: React 18 + TypeScript 5.7 + Vite 6
-- **UI Framework**: Tailwind CSS 3.4+ (coming in Story 0.3)
+- **UI Framework**: Tailwind CSS 3.4+ with custom design tokens
 - **State Management**: Zustand 5.0
 - **Virtual Scrolling**: TanStack Virtual 3.13
+- **Icons**: lucide-react
+- **Notifications**: react-hot-toast 2.4
 
 ## Quick Start
 
@@ -210,14 +212,86 @@ This project follows the BMad Method for structured software development:
 - **Epics & Stories**: `_bmad-output/planning-artifacts/epics.md`
 - **Project Context**: `_bmad-output/project-context.md` (AI agent coding rules)
 
+## Design System
+
+### Tailwind CSS Configuration
+
+The project uses a custom Tailwind CSS design system optimized for data-dense interfaces:
+
+**Color Palette**:
+- **Primary**: Professional blue scale for main actions and emphasis
+- **Success (Green)**: For "pass" firewall actions and positive states
+- **Warning (Orange)**: For "reject" firewall actions and warnings
+- **Error (Red)**: For "block" firewall actions and error states
+- **Neutral**: Gray scale (50-950) for backgrounds, borders, and text
+
+**Typography**:
+- **Monospace** (`JetBrains Mono`, `Consolas`): For technical data (IPs, timestamps, log entries)
+- **Sans-serif** (`Inter`, system fonts): For UI labels and controls
+- **Tight line-height** (1.3-1.5): For data-dense display
+
+**Spacing**:
+- Custom tight spacing values (2px, 4px, 8px) for data density
+- Standard Tailwind spacing available for general layout
+
+**Theme Support**:
+- **Dark/Light modes** using class strategy (`dark:` variant)
+- **System preference detection** on first launch
+- **localStorage persistence** across sessions
+- **Theme toggle** in app header
+
+### Base Components
+
+All base components support dark/light themes and include full accessibility (ARIA labels, keyboard navigation):
+
+- **Button**: Primary, secondary, ghost variants with sm/md/lg sizes
+- **Input**: Text and number inputs with error states and labels
+- **Select**: Native dropdown with custom styling
+- **Checkbox**: Custom checkbox with checkmark icon
+- **Toggle**: Switch component with smooth animation
+- **Modal**: Dialog with backdrop, focus trap, and ESC/click-outside close
+- **ProgressBar**: Progress indicator for indexation feedback
+- **Toast**: Success/error/info notifications (react-hot-toast)
+
+**Usage Example**:
+```typescript
+import { Button, Input, toast } from './components/base';
+
+// Use components with theme support
+<Button variant="primary" onClick={() => toast.success('Done!')}>
+  Submit
+</Button>
+
+<Input
+  label="Log file path"
+  placeholder="C:\logs\firewall.log"
+  error={errorMsg}
+/>
+```
+
+### Component Showcase
+
+Run the development server to view the component showcase:
+
+```bash
+npm run tauri dev
+```
+
+The showcase demonstrates all base components in both light and dark themes with interactive examples.
+
 ## Development Status
 
-**Current Story**: Epic 0, Story 0.1 - Project Scaffolding ✅ Complete
+**Current Story**: Epic 0, Story 0.3 - Tailwind CSS & Design System Foundation ✅ Complete
+
+**Completed**:
+- ✅ Story 0.1: Project Scaffolding with Tauri + React
+- ✅ Story 0.2: Comprehensive Test Infrastructure
+- ✅ Story 0.3: Tailwind CSS & Design System Foundation
 
 **Next Steps**:
-- Story 0.2: Comprehensive Test Infrastructure (MANDATORY before Epic 1)
-- Story 0.3: Tailwind CSS & Design System Foundation
 - Epic 1: Core Log Investigation Capability
+- Story 1.1: File Selection with Native OS Picker
+- Story 1.2: Multi-Format Log Parser
 
 See `_bmad-output/implementation-artifacts/sprint-status.yaml` for full project status.
 

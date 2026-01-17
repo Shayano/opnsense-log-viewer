@@ -1,50 +1,28 @@
-import { useState } from 'react';
-import reactLogo from './assets/react.svg';
-import { invoke } from '@tauri-apps/api/core';
-import './App.css';
+import { ThemeToggle } from './components/theme-toggle';
+import { Toaster } from './components/base';
+import { ComponentShowcase } from './pages/component-showcase';
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState('');
-  const [name, setName] = useState('');
-
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke('greet', { name }));
-  }
-
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank" rel="noreferrer">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank" rel="noreferrer">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank" rel="noreferrer">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+    <div className="min-h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+      <Toaster />
+      <header className="border-b border-gray-200 dark:border-gray-700 px-6 py-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-semibold">OPNsense Log Viewer</h1>
+          <ThemeToggle />
+        </div>
+      </header>
+      <main className="p-6">
+        <div className="mx-auto max-w-7xl">
+          <h2 className="text-xl font-medium mb-6">Component Showcase</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-8">
+            Tailwind CSS design system foundation is now configured. The component showcase below
+            demonstrates all base components with theme support.
+          </p>
+          <ComponentShowcase />
+        </div>
+      </main>
+    </div>
   );
 }
 

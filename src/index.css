@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light theme variables */
+    --bg-primary: 255 255 255;
+    --bg-secondary: 249 250 251;
+    --text-primary: 17 24 39;
+    --text-secondary: 107 114 128;
+    --border-primary: 229 231 235;
+
+    /* Action colors - light theme */
+    --color-block: 220 38 38;
+    --color-pass: 22 163 74;
+    --color-reject: 234 88 12;
+  }
+
+  .dark {
+    /* Dark theme variables */
+    --bg-primary: 17 24 39;
+    --bg-secondary: 31 41 55;
+    --text-primary: 249 250 251;
+    --text-secondary: 156 163 175;
+    --border-primary: 55 65 81;
+
+    /* Action colors - dark theme */
+    --color-block: 248 113 113;
+    --color-pass: 134 239 172;
+    --color-reject: 251 146 60;
+  }
+}

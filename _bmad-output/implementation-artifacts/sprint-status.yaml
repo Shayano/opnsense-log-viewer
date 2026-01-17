@@ -43,7 +43,7 @@ development_status:
   epic-0: in-progress
   0-1-project-scaffolding-with-tauri-react: done
   0-2-comprehensive-test-infrastructure: done
-  0-3-tailwind-css-design-system-foundation: backlog
+  0-3-tailwind-css-design-system-foundation: review
   epic-0-retrospective: optional
 
   epic-1: backlog
