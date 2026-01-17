@@ -13,10 +13,14 @@ pub struct LogEntry {
 }
 
 /// Placeholder parser result
+/// Note: Currently only used in tests - will be used in Story 1.2 implementation
+#[allow(dead_code)]
 pub type ParseResult = Result<LogEntry, String>;
 
 /// Placeholder function for parsing log lines
 /// Will be replaced with actual RFC3164/RFC5424/CSV parsers in Story 1.2
+/// Note: Currently only used in tests to validate proptest infrastructure
+#[allow(dead_code)]
 pub fn parse_log_placeholder(log_line: &str) -> ParseResult {
     // Simple validation - never panic, always return Ok or Err
     if log_line.is_empty() {

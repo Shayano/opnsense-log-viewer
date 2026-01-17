@@ -42,7 +42,7 @@ story_location: C:\Tools\opnsense-log-viewer\_bmad-output\implementation-artifac
 development_status:
   epic-0: in-progress
   0-1-project-scaffolding-with-tauri-react: done
-  0-2-comprehensive-test-infrastructure: review
+  0-2-comprehensive-test-infrastructure: done
   0-3-tailwind-css-design-system-foundation: backlog
   epic-0-retrospective: optional
 
