@@ -1,0 +1,84 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [main, tauri-rewrite]
+  pull_request:
+    branches: [main, tauri-rewrite]
+
+jobs:
+  frontend-tests:
+    name: Frontend Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend unit tests
+        run: npm test -- --run
+
+      - name: Run frontend coverage
+        run: npm run test:coverage
+
+      - name: Upload frontend coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: coverage/
+          retention-days: 7
+
+  backend-tests:
+    name: Backend Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            src-tauri/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Run backend unit tests
+        working-directory: src-tauri
+        run: cargo test --all-features
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results
+          path: src-tauri/target/debug/
+          retention-days: 7

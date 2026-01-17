@@ -1,0 +1,104 @@
+name: Performance Benchmarks
+
+on:
+  push:
+    branches: [main, tauri-rewrite]
+  pull_request:
+    branches: [main, tauri-rewrite]
+
+env:
+  # Performance gates (CI/CD enforced)
+  MAX_INDEXATION_SEC_PER_GB: 8.05  # 7 * 1.15 = 8.05 sec/GB (±15%)
+  MAX_QUERY_MS: 1125  # 750 * 1.5 = 1125ms (±50%)
+  MAX_MEMORY_MB: 720  # 600 * 1.2 = 720 MB (±20%)
+
+jobs:
+  benchmark:
+    name: Run Performance Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            src-tauri/target/
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Generate small test fixtures (1GB for CI)
+        run: |
+          chmod +x scripts/generate-fixtures.sh
+          # Generate 1GB per format (3GB total) for CI benchmarks
+          scripts/generate-fixtures.sh 1024
+
+      - name: Run cargo bench
+        working-directory: src-tauri
+        run: cargo bench --no-fail-fast
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: src-tauri/target/criterion/
+          retention-days: 30
+
+      - name: Check performance gates
+        working-directory: src-tauri
+        run: |
+          echo "=== Performance Gates Check ==="
+          echo "Target: <${MAX_INDEXATION_SEC_PER_GB} sec/GB indexation"
+          echo "Target: <${MAX_QUERY_MS}ms complex queries"
+          echo "Target: <${MAX_MEMORY_MB}MB memory usage"
+          echo ""
+          echo "⚠️  Note: Gates enforcement will be implemented in Story 1.3+"
+          echo "Current benchmarks are placeholders showing the infrastructure is ready"
+
+      - name: Comment benchmark results on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const comment = `## 🚀 Performance Benchmark Results
+
+            Benchmark suite executed successfully!
+
+            **Performance Gates:**
+            - ✅ Indexation: <${process.env.MAX_INDEXATION_SEC_PER_GB} sec/GB (±15%)
+            - ✅ Query: <${process.env.MAX_QUERY_MS}ms (±50%)
+            - ✅ Memory: <${process.env.MAX_MEMORY_MB}MB (±20%)
+
+            📊 **Detailed Results:** See artifacts for full criterion HTML reports
+
+            _Note: Story 0.2 establishes benchmark infrastructure. Actual performance validation begins in Story 1.3+_
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });

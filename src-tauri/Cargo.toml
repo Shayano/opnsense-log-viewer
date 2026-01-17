@@ -23,3 +23,11 @@ tauri-plugin-opener = "2.5.3"
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
 
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.5"
+
+[[bench]]
+name = "indexation_benchmarks"
+harness = false
+

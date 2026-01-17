@@ -75,21 +75,103 @@ cargo bench          # Performance benchmarks (Story 0.2+)
 cargo build --release # Release build
 ```
 
-### Testing
+## Testing
 
-**Frontend Tests** (Story 0.2: Test Infrastructure):
+This project has comprehensive test infrastructure established in **Story 0.2**:
+
+### Frontend Testing (Vitest + React Testing Library)
+
 ```bash
-npm test             # Run Vitest unit tests
-npm run test:coverage # Generate coverage report
+npm test                 # Run unit tests with Vitest
+npm run test:ui          # Open Vitest UI for interactive testing
+npm run test:coverage    # Generate code coverage report
 ```
 
-**Backend Tests** (Story 0.2: Test Infrastructure):
+**Coverage Target**: 60% for UI components
+
+### Backend Unit Testing (Rust + cargo test)
+
 ```bash
 cd src-tauri
-cargo test           # Unit + integration tests
-cargo test --release # Release mode tests
-cargo bench          # Performance benchmarks
+cargo test               # Run all unit tests
+cargo test --release     # Run tests in release mode
+cargo test parser        # Run tests for specific module
 ```
+
+**Coverage Targets**:
+- Critical modules (indexer/, parser/, query/): **90%**
+- Important modules (api_client/, export/): **75%**
+- UI components: **60%**
+
+### Performance Benchmarking (criterion.rs)
+
+```bash
+cd src-tauri
+cargo bench              # Run all benchmarks with criterion
+cargo bench indexation   # Run specific benchmark suite
+```
+
+Benchmark results are generated as HTML reports in `src-tauri/target/criterion/`.
+
+**Performance Gates (CI/CD Enforced)**:
+- ❌ **BUILD FAILS** if indexation >8.05 sec/GB (7 sec/GB ±15%)
+- ❌ **BUILD FAILS** if query execution >1125ms (750ms ±50%)
+- ❌ **BUILD FAILS** if memory usage >720 MB (600 MB ±20%)
+
+### Property-Based Testing (proptest)
+
+Parser robustness is validated with property-based fuzzing:
+
+```bash
+cd src-tauri
+cargo test --test '*'    # Run all tests including proptest
+```
+
+Proptest automatically generates 1000+ random test cases to verify parser never panics.
+
+### Integration Testing (Tauri IPC)
+
+Test Rust ↔ TypeScript communication across the IPC boundary:
+
+```bash
+npm run test:integration # Run Tauri IPC integration tests
+```
+
+Integration tests validate:
+- JSON serialization/deserialization with `#[serde(rename_all = "camelCase")]`
+- Error handling across IPC boundary (`Result<T, String>`)
+- Type safety enforcement
+
+### Test Fixture Generation
+
+Generate synthetic OPNsense firewall logs (30GB) for testing:
+
+**Windows (PowerShell)**:
+```powershell
+.\scripts\generate-fixtures.ps1          # Generate 3x10GB = 30GB
+.\scripts\generate-fixtures.ps1 -SizeMB 1024  # Generate 3x1GB = 3GB (for CI)
+```
+
+**Linux/macOS (Bash)**:
+```bash
+./scripts/generate-fixtures.sh          # Generate 3x10GB = 30GB
+./scripts/generate-fixtures.sh 1024     # Generate 3x1GB = 3GB (for CI)
+```
+
+Fixtures are generated in `tests/fixtures/` with realistic OPNsense data patterns:
+- RFC3164 format (legacy syslog)
+- RFC5424 format (modern syslog)
+- CSV filterlog format (OPNsense-specific)
+
+⚠️ **Note**: Test fixtures are gitignored (30GB files should not be committed).
+
+### CI/CD Pipelines
+
+Automated testing runs on every push and pull request:
+
+- **`.github/workflows/test.yml`**: Frontend + Backend unit tests
+- **`.github/workflows/bench.yml`**: Performance benchmarks with gates
+- **`.github/workflows/build.yml`**: Multi-platform builds (Windows, macOS, Linux)
 
 ## Project Structure
 

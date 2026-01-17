@@ -57,6 +57,10 @@ htmlcov/
 .pytest_cache/
 coverage_html/
 
+# Test fixtures (30GB synthetic logs - do not commit)
+tests/fixtures/*.log
+tests/fixtures/*mb.log
+
 # Temporary files
 *.tmp
 *.temp
