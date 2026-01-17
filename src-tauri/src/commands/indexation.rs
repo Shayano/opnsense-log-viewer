@@ -312,7 +312,7 @@ pub async fn build_hybrid_index(
 
             // Convert to types::IndexMetadata for compatibility
             Ok(IndexMetadata {
-                source_file_hash: "pending".to_string(), // Will be calculated in Story 1.4
+                source_file_hash: metadata.source_file_hash,
                 entry_count: metadata.entry_count,
                 format: format_str.to_string(),
                 index_size_bytes: 0, // Will be calculated in Story 1.4

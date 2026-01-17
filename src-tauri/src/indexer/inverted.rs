@@ -9,6 +9,12 @@ pub struct InvertedIndex {
     dest_ports: HashMap<u16, Vec<u64>>,
 }
 
+impl Default for InvertedIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InvertedIndex {
     pub fn new() -> Self {
         Self {
@@ -31,28 +37,28 @@ impl InvertedIndex {
         if let Some(ip) = source_ip {
             self.source_ips
                 .entry(ip.to_string())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(entry_id);
         }
 
         if let Some(ip) = dest_ip {
             self.dest_ips
                 .entry(ip.to_string())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(entry_id);
         }
 
         if let Some(port) = source_port {
             self.source_ports
                 .entry(port)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(entry_id);
         }
 
         if let Some(port) = dest_port {
             self.dest_ports
                 .entry(port)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(entry_id);
         }
     }

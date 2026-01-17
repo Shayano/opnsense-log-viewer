@@ -78,7 +78,6 @@ fn test_indexation_memory_usage_medium() {
 }
 
 #[test]
-#[ignore] // Ignore by default (slow test, ~500K entries = ~50MB)
 fn test_indexation_memory_usage_large() {
     PEAK_ALLOC.reset_peak_usage();
 

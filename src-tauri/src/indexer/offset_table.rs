@@ -4,6 +4,12 @@ pub struct OffsetTable {
     offsets: Vec<u64>,
 }
 
+impl Default for OffsetTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OffsetTable {
     pub fn new() -> Self {
         Self {

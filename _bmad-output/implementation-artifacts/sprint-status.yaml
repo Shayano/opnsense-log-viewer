@@ -49,7 +49,7 @@ development_status:
   epic-1: in-progress
   1-1-file-selection-with-native-os-picker: done
   1-2-multi-format-log-parser-rfc3164-rfc5424-csv: done
-  1-3-hybrid-index-creation-inverted-bitmap: review
+  1-3-hybrid-index-creation-inverted-bitmap: done
   1-4-index-persistence-reuse-with-sha256: backlog
   1-5-log-entry-display-table-with-virtual-scrolling: backlog
   1-6-entry-detail-view-with-copy-functionality: backlog

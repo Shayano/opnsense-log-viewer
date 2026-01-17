@@ -250,7 +250,7 @@ mod command_integration_tests {
         const BYTES_PER_GB: u64 = 1024 * 1024 * 1024;
         const LARGE_FILE_THRESHOLD: u64 = 50 * BYTES_PER_GB;
 
-        let small_file_size = 1 * BYTES_PER_GB; // 1GB
+        let small_file_size = BYTES_PER_GB; // 1GB
         let large_file_size = 60 * BYTES_PER_GB; // 60GB
 
         assert!(small_file_size < LARGE_FILE_THRESHOLD);

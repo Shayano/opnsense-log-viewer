@@ -74,6 +74,7 @@ fn test_indexation_rfc3164() {
     assert_eq!(metadata.entry_count, 100);
     assert_eq!(metadata.format, LogFormat::RFC3164);
     assert!(metadata.source_file_size > 0);
+    assert!(!metadata.source_file_hash.is_empty());
 }
 
 #[test]
@@ -90,6 +91,7 @@ fn test_indexation_rfc5424() {
     assert_eq!(metadata.entry_count, 100);
     assert_eq!(metadata.format, LogFormat::RFC5424);
     assert!(metadata.source_file_size > 0);
+    assert!(!metadata.source_file_hash.is_empty());
 }
 
 #[test]
@@ -106,6 +108,7 @@ fn test_indexation_csv() {
     assert_eq!(metadata.entry_count, 100);
     assert_eq!(metadata.format, LogFormat::CSV);
     assert!(metadata.source_file_size > 0);
+    assert!(!metadata.source_file_hash.is_empty());
 }
 
 #[test]

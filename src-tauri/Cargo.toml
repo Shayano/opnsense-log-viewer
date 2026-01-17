@@ -31,6 +31,7 @@ lazy_static = "1.5.0"
 log = "0.4.22"
 thiserror = "2.0.9"
 roaring = "0.10"
+sha2 = "0.10"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

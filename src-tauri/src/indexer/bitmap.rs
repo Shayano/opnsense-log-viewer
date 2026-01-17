@@ -9,6 +9,12 @@ pub struct BitmapIndex {
     interfaces: HashMap<String, RoaringBitmap>,
 }
 
+impl Default for BitmapIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BitmapIndex {
     pub fn new() -> Self {
         Self {
@@ -29,21 +35,21 @@ impl BitmapIndex {
         if let Some(action) = action {
             self.actions
                 .entry(action.to_lowercase())
-                .or_insert_with(RoaringBitmap::new)
+                .or_default()
                 .insert(entry_id as u32); // RoaringBitmap uses u32
         }
 
         if let Some(protocol) = protocol {
             self.protocols
                 .entry(protocol.to_uppercase())
-                .or_insert_with(RoaringBitmap::new)
+                .or_default()
                 .insert(entry_id as u32);
         }
 
         if let Some(interface) = interface {
             self.interfaces
                 .entry(interface.to_string())
-                .or_insert_with(RoaringBitmap::new)
+                .or_default()
                 .insert(entry_id as u32);
         }
     }

@@ -117,7 +117,7 @@ fn test_parser_handles_malformed_lines() {
     writeln!(file, "<134>Jan 17 12:30:45 firewall filterlog[12345]: valid entry").unwrap();
     writeln!(file, "this is not a valid log entry").unwrap();
     writeln!(file, "<134>Jan 17 12:30:46 firewall filterlog[12345]: another valid entry").unwrap();
-    writeln!(file, "").unwrap(); // Empty line
+    writeln!(file).unwrap(); // Empty line
     writeln!(file, "<134>Jan 17 12:30:47 firewall filterlog[12345]: third valid entry").unwrap();
 
     let result = parse_file_streaming(&file_path, LogFormat::RFC3164);

@@ -1,9 +1,11 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::io::Read;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use sha2::{Sha256, Digest};
 
 use crate::indexer::inverted::InvertedIndex;
 use crate::indexer::bitmap::BitmapIndex;
@@ -20,6 +22,7 @@ pub struct IndexMetadata {
     pub created_at: DateTime<Utc>,
     pub source_file_path: String,
     pub source_file_size: u64,
+    pub source_file_hash: String,
 }
 
 #[derive(Error, Debug)]
@@ -45,6 +48,12 @@ pub struct HybridIndex {
     cancellation_token: Arc<AtomicBool>,
 }
 
+impl Default for HybridIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HybridIndex {
     pub fn new() -> Self {
         Self {
@@ -54,6 +63,24 @@ impl HybridIndex {
             metadata: None,
             cancellation_token: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Calculate SHA-256 hash of a file
+    fn calculate_file_hash<P: AsRef<Path>>(file_path: P) -> Result<String, IndexError> {
+        let mut file = std::fs::File::open(file_path)?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0; 8192];
+
+        loop {
+            let bytes_read = file.read(&mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..bytes_read]);
+        }
+
+        let result = hasher.finalize();
+        Ok(format!("{:x}", result))
     }
 
     /// Build index from a log file with progress callback
@@ -70,6 +97,9 @@ impl HybridIndex {
         let file_path = file_path.as_ref();
         let file_size = std::fs::metadata(file_path)?.len();
 
+        // Calculate SHA-256 hash of source file
+        let source_hash = Self::calculate_file_hash(file_path)?;
+
         // Parse file and build indexes
         let (entries, _parse_stats) = parse_file_streaming(file_path, format)
             .map_err(|e| IndexError::ParseError(e.to_string()))?;
@@ -77,6 +107,7 @@ impl HybridIndex {
         let total_entries = entries.len() as u64;
         let mut bytes_processed = 0u64;
         let start_time = std::time::Instant::now();
+        let mut last_progress_time = start_time;
 
         for (idx, entry) in entries.into_iter().enumerate() {
             // Check cancellation every 100 entries
@@ -115,9 +146,12 @@ impl HybridIndex {
             let estimated_offset = (idx as u64 * file_size) / total_entries;
             self.offset_table.add_offset(entry.id, estimated_offset);
 
-            // Update progress every 100MB worth of entries
+            // Update progress every 500ms or at completion
             bytes_processed += entry.raw_line.len() as u64;
-            if bytes_processed % (100 * 1024 * 1024) == 0 || idx == total_entries as usize - 1 {
+            let now = std::time::Instant::now();
+            let is_complete = idx == total_entries as usize - 1;
+
+            if now.duration_since(last_progress_time).as_millis() >= 500 || is_complete {
                 let elapsed = start_time.elapsed().as_secs_f64();
                 let progress = IndexProgress::new(
                     bytes_processed,
@@ -125,6 +159,7 @@ impl HybridIndex {
                     elapsed,
                 );
                 progress_callback(progress);
+                last_progress_time = now;
             }
         }
 
@@ -135,6 +170,7 @@ impl HybridIndex {
             created_at: Utc::now(),
             source_file_path: file_path.to_string_lossy().to_string(),
             source_file_size: file_size,
+            source_file_hash: source_hash,
         };
 
         self.metadata = Some(metadata.clone());
