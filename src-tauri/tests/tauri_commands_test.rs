@@ -182,6 +182,7 @@ fn test_index_metadata_camel_case_serialization() {
         format: "RFC3164".to_string(),
         index_size_bytes: 2048,
         created_at: "2026-01-17T00:00:00Z".to_string(),
+        parsing_stats: None,
     };
 
     let json = serde_json::to_string(&metadata).expect("Failed to serialize");
@@ -207,7 +208,8 @@ fn test_index_metadata_typescript_interop() {
         "entryCount": 5000,
         "format": "RFC5424",
         "indexSizeBytes": 4096,
-        "createdAt": "2026-01-17T12:00:00Z"
+        "createdAt": "2026-01-17T12:00:00Z",
+        "parsingStats": null
     }"#;
 
     let metadata: IndexMetadata = serde_json::from_str(typescript_json)

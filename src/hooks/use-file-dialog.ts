@@ -104,6 +104,7 @@ export function useFileDialog() {
       toast.success('File indexed successfully');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Indexation failed';
+      setLoading(false); // Explicitly stop loading on error
       setError(errorMessage);
       toast.error(`Failed to index file: ${errorMessage}`);
     }

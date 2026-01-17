@@ -52,12 +52,12 @@ describe('FileSelector', () => {
       expect(open).toHaveBeenCalledWith({
         multiple: false,
         directory: false,
-        filters: expect.arrayContaining([
+        filters: [
           { name: 'Log Files', extensions: ['log'] },
           { name: 'Text Files', extensions: ['txt'] },
           { name: 'CSV Files', extensions: ['csv'] },
           { name: 'All Files', extensions: ['*'] },
-        ]),
+        ],
       });
     });
   });
@@ -153,8 +153,22 @@ describe('FileSelector', () => {
 
     render(<FileSelector />);
 
-    // Simulate Ctrl+O
+    // Simulate Ctrl+O (Windows/Linux)
     await userEvent.keyboard('{Control>}o{/Control}');
+
+    await waitFor(() => {
+      expect(open).toHaveBeenCalled();
+    });
+  });
+
+  it('supports keyboard shortcut Cmd+O on macOS', async () => {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    vi.mocked(open).mockResolvedValue(null);
+
+    render(<FileSelector />);
+
+    // Simulate Cmd+O (macOS) using Meta key
+    await userEvent.keyboard('{Meta>}o{/Meta}');
 
     await waitFor(() => {
       expect(open).toHaveBeenCalled();

@@ -30,13 +30,7 @@ export function LargeFileWarning({
           <AlertTriangle className="text-yellow-500 flex-shrink-0" size={24} />
           <div>
             <p className="text-gray-900 dark:text-gray-100">
-              Large file may take extended time to index.
-            </p>
-            <p className="text-gray-700 dark:text-gray-300 mt-2">
-              File size: <strong>{fileSizeGB} GB</strong>
-            </p>
-            <p className="text-gray-600 dark:text-gray-400 mt-2 text-sm">
-              Indexing large files can take several minutes. Do you want to continue?
+              Large file may take extended time to index. File size: <strong>{fileSizeGB} GB</strong>. Continue?
             </p>
           </div>
         </div>

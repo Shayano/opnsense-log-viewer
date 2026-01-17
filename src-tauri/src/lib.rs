@@ -1,7 +1,7 @@
 // Modules
 mod commands;
-mod parser; // Parser module (placeholder for Story 1.2)
-mod types;
+pub mod parser; // Parser module - Public for integration tests
+pub mod types;
 
 // Re-export types for use in other modules
 pub use types::{FileMetadata, IndexMetadata};
@@ -20,7 +20,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             commands::indexation::get_file_metadata,
-            commands::indexation::index_file
+            commands::indexation::index_file,
+            commands::indexation::index_file_with_format
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

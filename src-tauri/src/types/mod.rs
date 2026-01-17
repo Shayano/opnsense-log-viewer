@@ -1,3 +1,5 @@
+pub mod log_entry;
+
 use serde::{Deserialize, Serialize};
 
 /// Metadata about the indexed file
@@ -14,6 +16,20 @@ pub struct IndexMetadata {
     pub index_size_bytes: u64,
     /// ISO 8601 timestamp when the index was created
     pub created_at: String,
+    /// Parsing statistics (total lines, skipped malformed, etc.)
+    pub parsing_stats: Option<ParsingStats>,
+}
+
+/// Parsing statistics for transparency
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ParsingStats {
+    /// Total lines processed
+    pub total_lines: u64,
+    /// Successfully parsed entries
+    pub parsed_successfully: u64,
+    /// Skipped malformed lines
+    pub skipped_malformed: u64,
 }
 
 /// File metadata (size, etc.)
