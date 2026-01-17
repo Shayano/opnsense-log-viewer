@@ -40,10 +40,10 @@ tracking_system: file-system
 story_location: C:\Tools\opnsense-log-viewer\_bmad-output\implementation-artifacts
 
 development_status:
-  epic-0: in-progress
+  epic-0: done
   0-1-project-scaffolding-with-tauri-react: done
   0-2-comprehensive-test-infrastructure: done
-  0-3-tailwind-css-design-system-foundation: review
+  0-3-tailwind-css-design-system-foundation: done
   epic-0-retrospective: optional
 
   epic-1: backlog

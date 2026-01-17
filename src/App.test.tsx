@@ -5,17 +5,20 @@ import App from './App';
 describe('App', () => {
   it('renders without crashing', () => {
     render(<App />);
-    expect(screen.getByText(/Welcome to Tauri \+ React/i)).toBeInTheDocument();
+    expect(screen.getByText(/OPNsense Log Viewer/i)).toBeInTheDocument();
   });
 
-  it('displays the greet button', () => {
+  it('displays the header with theme toggle', () => {
     render(<App />);
-    expect(screen.getByText(/Greet/i)).toBeInTheDocument();
+    expect(screen.getByText(/OPNsense Log Viewer/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Toggle dark mode/i)).toBeInTheDocument();
   });
 
-  it('displays the input field', () => {
+  it('displays the component showcase section', () => {
     render(<App />);
-    const input = screen.getByPlaceholderText(/Enter a name/i);
-    expect(input).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Component Showcase/i })).toBeInTheDocument();
+    expect(
+      screen.getByText(/Tailwind CSS design system foundation is now configured/i)
+    ).toBeInTheDocument();
   });
 });

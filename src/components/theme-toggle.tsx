@@ -1,11 +1,11 @@
-import React from 'react';
+import { KeyboardEvent } from 'react';
 import { Moon, Sun } from 'lucide-react';
 import { useTheme } from '../hooks/use-theme';
 
 export function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       toggleTheme();

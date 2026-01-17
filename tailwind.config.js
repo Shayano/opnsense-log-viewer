@@ -5,6 +5,18 @@ export default {
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
   darkMode: 'class',
+  safelist: [
+    // Safelist action colors that might be used dynamically
+    'text-success-600',
+    'text-warning-600',
+    'text-error-600',
+    'bg-success-600',
+    'bg-warning-600',
+    'bg-error-600',
+    'border-success-600',
+    'border-warning-600',
+    'border-error-600',
+  ],
   theme: {
     extend: {
       colors: {

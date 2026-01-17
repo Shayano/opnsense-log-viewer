@@ -1,5 +1,6 @@
 import { ThemeToggle } from './components/theme-toggle';
 import { Toaster } from './components/base';
+import { ErrorBoundary } from './components/error-boundary';
 import { ComponentShowcase } from './pages/component-showcase';
 
 function App() {
@@ -19,7 +20,15 @@ function App() {
             Tailwind CSS design system foundation is now configured. The component showcase below
             demonstrates all base components with theme support.
           </p>
-          <ComponentShowcase />
+          <ErrorBoundary
+            fallback={
+              <div className="text-center text-error-600 dark:text-error-400">
+                Component showcase failed to load
+              </div>
+            }
+          >
+            <ComponentShowcase />
+          </ErrorBoundary>
         </div>
       </main>
     </div>

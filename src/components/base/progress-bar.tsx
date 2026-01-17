@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { cn } from '../../utils/cn';
 
 interface ProgressBarProps {
@@ -9,7 +10,7 @@ interface ProgressBarProps {
 
 export function ProgressBar({ value, label, showPercentage = false, className }: ProgressBarProps) {
   const clampedValue = Math.min(100, Math.max(0, value));
-  const progressId = `progress-${Math.random().toString(36).slice(2, 9)}`;
+  const progressId = useId();
 
   return (
     <div className={cn('w-full', className)}>

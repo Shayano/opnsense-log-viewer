@@ -1,4 +1,4 @@
-import React, { InputHTMLAttributes, forwardRef } from 'react';
+import { ChangeEvent, InputHTMLAttributes, forwardRef, useId } from 'react';
 import { cn } from '../../utils/cn';
 
 interface ToggleProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> {
@@ -7,7 +7,8 @@ interface ToggleProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type'
 
 export const Toggle = forwardRef<HTMLInputElement, ToggleProps>(
   ({ label, checked, onChange, className, id, disabled, ...props }, ref) => {
-    const toggleId = id || `toggle-${Math.random().toString(36).slice(2, 9)}`;
+    const generatedId = useId();
+    const toggleId = id || generatedId;
 
     return (
       <div className="flex items-center gap-2">
@@ -22,7 +23,7 @@ export const Toggle = forwardRef<HTMLInputElement, ToggleProps>(
               const event = {
                 target: { checked: !checked },
                 currentTarget: { checked: !checked },
-              } as React.ChangeEvent<HTMLInputElement>;
+              } as ChangeEvent<HTMLInputElement>;
               onChange(event);
             }
           }}

@@ -1,4 +1,4 @@
-import React, { SelectHTMLAttributes, forwardRef } from 'react';
+import { ChangeEvent, SelectHTMLAttributes, forwardRef, useId } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { cn } from '../../utils/cn';
 
@@ -16,9 +16,10 @@ interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'onC
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
   ({ label, options, placeholder, onChange, className, id, ...props }, ref) => {
-    const selectId = id || `select-${Math.random().toString(36).slice(2, 9)}`;
+    const generatedId = useId();
+    const selectId = id || generatedId;
 
-    const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const handleChange = (e: ChangeEvent<HTMLSelectElement>) => {
       onChange?.(e.target.value);
     };
 
@@ -37,7 +38,6 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
             ref={ref}
             id={selectId}
             aria-label={label || props['aria-label']}
-            aria-expanded="false"
             onChange={handleChange}
             className={cn(
               'w-full appearance-none rounded-md border px-3 py-2 pr-10 text-sm transition-colors',
