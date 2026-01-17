@@ -46,8 +46,8 @@ development_status:
   0-3-tailwind-css-design-system-foundation: done
   epic-0-retrospective: optional
 
-  epic-1: backlog
-  1-1-file-selection-with-native-os-picker: backlog
+  epic-1: in-progress
+  1-1-file-selection-with-native-os-picker: review
   1-2-multi-format-log-parser-rfc3164-rfc5424-csv: backlog
   1-3-hybrid-index-creation-inverted-bitmap: backlog
   1-4-index-persistence-reuse-with-sha256: backlog

@@ -2,6 +2,7 @@ import { ThemeToggle } from './components/theme-toggle';
 import { Toaster } from './components/base';
 import { ErrorBoundary } from './components/error-boundary';
 import { ComponentShowcase } from './pages/component-showcase';
+import { FileSelector, FileError } from './components/file-selector';
 
 function App() {
   return (
@@ -15,7 +16,17 @@ function App() {
       </header>
       <main className="p-6">
         <div className="mx-auto max-w-7xl">
-          <h2 className="text-xl font-medium mb-6">Component Showcase</h2>
+          <h2 className="text-xl font-medium mb-6">File Selection</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
+            Select a log file to begin analyzing. Supports .log, .txt, .csv and other text formats.
+          </p>
+
+          <div className="mb-8">
+            <FileError />
+            <FileSelector />
+          </div>
+
+          <h2 className="text-xl font-medium mb-6 mt-12">Component Showcase</h2>
           <p className="text-gray-600 dark:text-gray-400 mb-8">
             Tailwind CSS design system foundation is now configured. The component showcase below
             demonstrates all base components with theme support.
