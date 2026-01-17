@@ -1,8 +1,11 @@
 use crate::types::{FileMetadata, IndexMetadata};
 use crate::parser::{detect_format, parse_file_streaming};
 use crate::types::log_entry::LogFormat;
+use crate::indexer::{HybridIndex, IndexProgress};
 use std::fs;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
+use tauri::{AppHandle, Emitter};
 
 /// Get file metadata (size)
 #[tauri::command]
@@ -221,6 +224,121 @@ pub async fn index_file_with_format(
             skipped_malformed: stats.skipped_malformed,
         }),
     })
+}
+
+// Global state for cancellation token
+lazy_static::lazy_static! {
+    static ref HYBRID_INDEX: Arc<Mutex<Option<HybridIndex>>> = Arc::new(Mutex::new(None));
+}
+
+/// Build hybrid index (Story 1.3) - with progress events
+#[tauri::command]
+pub async fn build_hybrid_index(
+    app: AppHandle,
+    file_path: String,
+) -> Result<IndexMetadata, String> {
+    // 1. Validate file path exists
+    let path = Path::new(&file_path);
+
+    if !path.exists() {
+        return Err("File not found. Please ensure the file path is correct.".to_string());
+    }
+
+    if !path.is_file() {
+        return Err("Path is not a file.".to_string());
+    }
+
+    // 2. Check read permissions
+    let canonical_path = path.canonicalize()
+        .map_err(|e| format!("Invalid file path: {}. Please check the path and try again.", e))?;
+
+    if !canonical_path.is_absolute() {
+        return Err("Invalid file path: path must be absolute.".to_string());
+    }
+
+    match fs::File::open(&canonical_path) {
+        Ok(_) => {},
+        Err(e) => {
+            return Err(format!(
+                "Failed to open file: {}. Please check file permissions and try again.",
+                e
+            ));
+        }
+    }
+
+    // 3. Detect log format
+    let detected_format = detect_format(&canonical_path)
+        .map_err(|e| format!("Failed to detect log format: {}. Please select format manually or check file contents.", e))?;
+
+    // Convert LogFormat enum to string for IndexMetadata
+    let format_str = match detected_format {
+        LogFormat::RFC3164 => "RFC3164",
+        LogFormat::RFC5424 => "RFC5424",
+        LogFormat::CSV => "CSV",
+        LogFormat::Unknown => {
+            return Err("Unable to auto-detect log format. Please select format manually.".to_string());
+        }
+    };
+
+    // 4. Create hybrid index
+    let hybrid_index = HybridIndex::new();
+
+    // Store the index in global state for cancellation
+    {
+        let mut guard = HYBRID_INDEX.lock().unwrap();
+        *guard = Some(hybrid_index);
+    }
+
+    // 5. Build index with progress callback
+    let app_clone = app.clone();
+    let result = {
+        let mut guard = HYBRID_INDEX.lock().unwrap();
+        let index = guard.as_mut().unwrap();
+
+        index.build_index(
+            &canonical_path,
+            detected_format,
+            move |progress: IndexProgress| {
+                // Emit progress event to frontend
+                let _ = app_clone.emit("indexation-progress", &progress);
+            }
+        )
+    };
+
+    match result {
+        Ok(metadata) => {
+            // Emit completion event
+            let _ = app.emit("indexation-complete", &metadata);
+
+            // Convert to types::IndexMetadata for compatibility
+            Ok(IndexMetadata {
+                source_file_hash: "pending".to_string(), // Will be calculated in Story 1.4
+                entry_count: metadata.entry_count,
+                format: format_str.to_string(),
+                index_size_bytes: 0, // Will be calculated in Story 1.4
+                created_at: metadata.created_at.to_rfc3339(),
+                parsing_stats: None,
+            })
+        }
+        Err(e) => {
+            // Emit error event
+            let error_msg = format!("{}", e);
+            let _ = app.emit("indexation-error", &error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+/// Cancel ongoing indexation
+#[tauri::command]
+pub async fn cancel_indexation() -> Result<(), String> {
+    let guard = HYBRID_INDEX.lock().unwrap();
+    if let Some(index) = guard.as_ref() {
+        index.cancel();
+        Ok(())
+    } else {
+        Err("No indexation in progress".to_string())
+    }
 }
 
 #[cfg(test)]
