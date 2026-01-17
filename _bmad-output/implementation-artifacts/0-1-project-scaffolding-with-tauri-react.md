@@ -1,6 +1,6 @@
 # Story 0.1: Project Scaffolding with Tauri + React
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -44,21 +44,21 @@ So that I have a clean, production-ready foundation to build the log viewer appl
   - [x] Verify Vite config exists (vite.config.ts)
   - [x] Verify tauri.conf.json exists with basic window configuration
 
-- [ ] Install dependencies and verify dev build (AC: Application launches)
+- [x] Install dependencies and verify dev build (AC: Application launches)
   - [x] Run `npm install` to install frontend dependencies
   - [x] Run `npm run tauri dev` to verify build and launch
   - [x] Confirm application window opens with default Tauri + React template content
   - [x] Verify no build errors in console
   - [x] Verify hot-reload works (modify App.tsx and see changes)
 
-- [ ] Configure TypeScript strict mode (AC: TypeScript strict mode enabled)
+- [x] Configure TypeScript strict mode (AC: TypeScript strict mode enabled)
   - [x] Open tsconfig.json
   - [x] Ensure `"strict": true` is set
   - [x] Ensure `"noImplicitAny": true`
   - [x] Ensure `"strictNullChecks": true`
   - [x] Verify TypeScript compiles without errors
 
-- [ ] Setup linting and formatting (AC: ESLint, Prettier, clippy, rustfmt)
+- [x] Setup linting and formatting (AC: ESLint, Prettier, clippy, rustfmt)
   - [x] Verify ESLint config exists (.eslintrc.cjs or eslint.config.js)
   - [x] Install and configure Prettier if not present
   - [x] Create .prettierrc with project style (2-space indent, single quotes)
@@ -68,7 +68,7 @@ So that I have a clean, production-ready foundation to build the log viewer appl
   - [x] Run `cargo fmt --check` to verify rustfmt works
   - [x] Run `cargo clippy` to verify no warnings in default template
 
-- [ ] Initialize Git repository with .gitignore (AC: Git repository initialized)
+- [x] Initialize Git repository with .gitignore (AC: Git repository initialized)
   - [x] Verify `.git/` directory exists (create-tauri-app should initialize it)
   - [x] Verify .gitignore includes:
     - `/target/` (Rust build artifacts)
@@ -77,7 +77,7 @@ So that I have a clean, production-ready foundation to build the log viewer appl
     - `/src-tauri/target/` (Tauri build artifacts)
   - [x] Make initial commit with message "Initialize Tauri + React project with create-tauri-app v4.6.0"
 
-- [ ] Update README.md (AC: README contains project details)
+- [x] Update README.md (AC: README contains project details)
   - [x] Update project name to "opnsense-log-viewer" if not already set
   - [x] Add description: "High-performance desktop application for investigating OPNsense firewall logs (30GB+) with instant search and API enrichment"
   - [x] Add "Quick Start" section with:
@@ -271,6 +271,22 @@ Claude Sonnet 4.5 (claude-sonnet-4-5-20250929)
 - ✅ Prettier: All files formatted
 - ✅ Rust fmt: All files formatted (cargo fmt)
 - ✅ Clippy: No warnings (cargo clippy)
+
+**Code Review Fixes Applied (2026-01-17 by Adversarial Code Reviewer)**:
+- ✅ Fixed dependency versions to exact versions (removed all `^` wildcards - Critical anti-pattern)
+- ✅ Downgraded React 19.1.0 → 18.3.1 (aligned with architecture requirement: React 18.3+)
+- ✅ Downgraded TypeScript 5.8.3 → 5.7.2 (aligned with project context: TypeScript 5.7)
+- ✅ Downgraded Vite 7.0.4 → 6.0.8 (aligned with architecture requirement: Vite 6.0+)
+- ✅ Downgraded ESLint 9.39.2 → 9.18.0 (aligned with project context: ESLint 9.18+)
+- ✅ Downgraded Prettier 3.8.0 → 3.4.2 (aligned with project context: Prettier 3.4+)
+- ✅ Updated Rust dependencies to exact versions (Tauri 2.1.2, serde 1.0.215, serde_json 1.0.133)
+- ✅ Updated tauri-plugin-opener to 2.5.3 (latest stable for Tauri v2)
+- ✅ Marked all parent tasks as complete (5 tasks had completed subtasks but parent was unmarked)
+- ✅ Added comprehensive Testing section to README with frontend and backend test commands
+- ✅ Aligned README performance targets with architecture gates (±15%, ±50%, ±20%)
+- ✅ Fixed ESLint scripts for flat config compatibility (removed deprecated --ext flag)
+- ✅ Added ignore patterns to ESLint config (dist/, node_modules/, target/)
+- ✅ Validated all builds: TypeScript ✅, ESLint ✅, Rust ✅
 
 **Next Steps**:
 - Story 0.2: Comprehensive Test Infrastructure (Vitest, proptest, criterion)

@@ -70,8 +70,25 @@ npm run format:check # Check formatting
 cd src-tauri
 cargo fmt            # Format Rust code
 cargo clippy         # Linting
-cargo test           # Run tests
+cargo test           # Run tests (Story 0.2+)
+cargo bench          # Performance benchmarks (Story 0.2+)
 cargo build --release # Release build
+```
+
+### Testing
+
+**Frontend Tests** (Story 0.2: Test Infrastructure):
+```bash
+npm test             # Run Vitest unit tests
+npm run test:coverage # Generate coverage report
+```
+
+**Backend Tests** (Story 0.2: Test Infrastructure):
+```bash
+cd src-tauri
+cargo test           # Unit + integration tests
+cargo test --release # Release mode tests
+cargo bench          # Performance benchmarks
 ```
 
 ## Project Structure
@@ -124,9 +141,9 @@ See `_bmad-output/implementation-artifacts/sprint-status.yaml` for full project 
 
 ## Performance Targets
 
-- **Indexing**: <7 sec/GB (2-3 minutes for 20-30GB logs)
-- **Query Execution**: <500ms simple queries, <750ms complex queries
-- **Memory Usage**: <600 MB peak during indexing
+- **Indexing**: <7 sec/GB (±15%) - 2-3 minutes for 20-30GB logs
+- **Query Execution**: <750ms (±50%) - Complex boolean queries
+- **Memory Usage**: <600 MB (±20%) - Peak during indexing
 - **UI Responsiveness**: 60 FPS scrolling with 100K+ entries
 
 ## License
