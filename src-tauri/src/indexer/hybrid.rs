@@ -200,6 +200,29 @@ impl HybridIndex {
     pub fn metadata(&self) -> Option<&IndexMetadata> {
         self.metadata.as_ref()
     }
+
+    /// Get reference to inverted index
+    pub fn inverted_index(&self) -> &InvertedIndex {
+        &self.inverted_index
+    }
+
+    /// Get reference to bitmap index
+    pub fn bitmap_index(&self) -> &BitmapIndex {
+        &self.bitmap_index
+    }
+
+    /// Get reference to offset table
+    pub fn offset_table(&self) -> &OffsetTable {
+        &self.offset_table
+    }
+
+    /// Get entry count
+    pub fn entry_count(&self) -> usize {
+        self.metadata
+            .as_ref()
+            .map(|m| m.entry_count as usize)
+            .unwrap_or(0)
+    }
 }
 
 #[cfg(test)]

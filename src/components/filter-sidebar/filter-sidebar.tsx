@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Filter as FilterIcon, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter as FilterIcon, Search, Loader2 } from 'lucide-react';
 import { useFilterStore } from '@/stores/filter-store';
+import { useQueryStore } from '@/stores/query-store';
 import { FilterBuilder } from '@/components/filter-builder';
 import { ActiveFiltersList } from './active-filters-list';
+import { executeQuery } from '@/utils/query-client';
+import toast from 'react-hot-toast';
 import type { Filter } from '@/types/filter';
 
 export function FilterSidebar(): JSX.Element {
@@ -13,6 +16,8 @@ export function FilterSidebar(): JSX.Element {
   const filters = useFilterStore((state) => state.filters);
   const draftMode = useFilterStore((state) => state.draftMode);
   const setDraftMode = useFilterStore((state) => state.setDraftMode);
+
+  const { setResult, setExecuting, setError, isExecuting } = useQueryStore();
 
   // Persist collapsed state in localStorage
   useEffect(() => {
@@ -41,9 +46,29 @@ export function FilterSidebar(): JSX.Element {
     return () => window.removeEventListener('keydown', handleKeyboard);
   }, [toggleCollapse]);
 
-  const handleSearch = (): void => {
+  const handleSearch = async (): Promise<void> => {
+    if (filters.length === 0) {
+      toast.error('Add at least one filter');
+      return;
+    }
+
+    setExecuting(true);
     setDraftMode(false); // Transition to active mode
-    // Query execution will be handled in Story 2.2
+
+    try {
+      // Get index hash from global state (placeholder for now)
+      const indexHash = '';
+      const result = await executeQuery(filters, indexHash);
+      setResult(result);
+
+      toast.success(
+        `Found ${result.matchedCount} of ${result.totalCount} entries (${result.executionTimeMs}ms)`
+      );
+    } catch (error) {
+      setError(String(error));
+      toast.error(String(error));
+      setDraftMode(true); // Return to draft mode on error
+    }
   };
 
   const handleAddFilter = (): void => {
@@ -132,13 +157,24 @@ export function FilterSidebar(): JSX.Element {
           <div className="p-4 border-t border-gray-200 dark:border-gray-700">
             <button
               onClick={handleSearch}
+              disabled={isExecuting}
               className="w-full px-4 py-3 text-sm font-semibold text-white bg-blue-600
                 hover:bg-blue-700 active:scale-95 rounded-lg transition-all
-                flex items-center justify-center gap-2 shadow-md"
+                flex items-center justify-center gap-2 shadow-md
+                disabled:bg-gray-400 disabled:cursor-not-allowed"
               aria-label={`Execute search with ${filters.length} filter${filters.length > 1 ? 's' : ''}`}
             >
-              <Search className="w-4 h-4" />
-              Search ({filters.length} filter{filters.length > 1 ? 's' : ''})
+              {isExecuting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Searching...
+                </>
+              ) : (
+                <>
+                  <Search className="w-4 h-4" />
+                  Search ({filters.length} filter{filters.length > 1 ? 's' : ''})
+                </>
+              )}
             </button>
           </div>
         )}
