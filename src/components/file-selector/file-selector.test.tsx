@@ -86,7 +86,7 @@ describe('FileSelector', () => {
     expect(screen.getByText(/60\.0.*gb/i)).toBeInTheDocument();
   });
 
-  it('proceeds with indexation for files under 50GB', async () => {
+  it('proceeds with indexation for files under 50GB when no existing index', async () => {
     const { invoke } = await import('@tauri-apps/api/core');
     const { open } = await import('@tauri-apps/plugin-dialog');
     const { toast } = await import('@/components/base/toaster');
@@ -94,10 +94,12 @@ describe('FileSelector', () => {
 
     // Mock file selection
     vi.mocked(open).mockResolvedValue('/path/to/small.log');
-    // Mock small file size: 1GB
     vi.mocked(invoke)
+      // 1. get_file_metadata: small file size (1GB)
       .mockResolvedValueOnce({ size: 1 * 1024 * 1024 * 1024 })
-      // Mock index_file response
+      // 2. load_index_file: no existing index (throws error per Tauri Result pattern)
+      .mockRejectedValueOnce('No saved index found for this file')
+      // 3. index_file: successful indexation
       .mockResolvedValueOnce({
         sourceFileHash: 'abc123',
         entryCount: 1000,
@@ -111,7 +113,7 @@ describe('FileSelector', () => {
     const button = screen.getByRole('button', { name: /open log file/i });
     await user.click(button);
 
-    // Wait for success toast
+    // Wait for success toast (new indexation)
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith('File indexed successfully');
     });
@@ -120,6 +122,85 @@ describe('FileSelector', () => {
     await waitFor(() => {
       expect(screen.getByText(/selected file:/i)).toBeInTheDocument();
       expect(screen.getByText(/\/path\/to\/small\.log/i)).toBeInTheDocument();
+    });
+  });
+
+  it('uses existing index when valid index exists', async () => {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const { toast } = await import('@/components/base/toaster');
+    const user = userEvent.setup();
+
+    // Mock file selection
+    vi.mocked(open).mockResolvedValue('/path/to/indexed.log');
+    vi.mocked(invoke)
+      // 1. get_file_metadata: file size
+      .mockResolvedValueOnce({ size: 500 * 1024 * 1024 })
+      // 2. load_index_file: existing index found (returns IndexMetadata directly per Tauri Result pattern)
+      .mockResolvedValueOnce({
+        sourceFileHash: 'existing123',
+        entryCount: 5000,
+        format: 'RFC5424',
+        indexSizeBytes: 2048,
+        createdAt: '2026-01-16T12:00:00Z',
+      });
+
+    render(<FileSelector />);
+
+    const button = screen.getByRole('button', { name: /open log file/i });
+    await user.click(button);
+
+    // Wait for success toast (using existing index)
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith('Using existing index');
+    });
+  });
+
+  it('shows hash mismatch dialog when file was modified', async () => {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const user = userEvent.setup();
+
+    // Mock file selection
+    vi.mocked(open).mockResolvedValue('/path/to/modified.log');
+    vi.mocked(invoke)
+      // 1. get_file_metadata
+      .mockResolvedValueOnce({ size: 100 * 1024 * 1024 })
+      // 2. load_index_file: file was modified (throws error per Tauri Result pattern)
+      .mockRejectedValueOnce('File has been modified since indexing. Please re-index the file.');
+
+    render(<FileSelector />);
+
+    const button = screen.getByRole('button', { name: /open log file/i });
+    await user.click(button);
+
+    // Wait for hash mismatch dialog
+    await waitFor(() => {
+      expect(screen.getByText('Source File Changed')).toBeInTheDocument();
+    });
+  });
+
+  it('shows corruption dialog when index is corrupted', async () => {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const user = userEvent.setup();
+
+    // Mock file selection
+    vi.mocked(open).mockResolvedValue('/path/to/corrupted.log');
+    vi.mocked(invoke)
+      // 1. get_file_metadata
+      .mockResolvedValueOnce({ size: 100 * 1024 * 1024 })
+      // 2. load_index_file: index corrupted (throws error with Checksum)
+      .mockRejectedValueOnce('Failed to load index: Checksum mismatch');
+
+    render(<FileSelector />);
+
+    const button = screen.getByRole('button', { name: /open log file/i });
+    await user.click(button);
+
+    // Wait for corruption dialog
+    await waitFor(() => {
+      expect(screen.getByText('Index File Corrupted')).toBeInTheDocument();
     });
   });
 

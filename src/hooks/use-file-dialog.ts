@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { useFileStore } from '@/stores/file-store';
-import type { FileMetadata, IndexMetadata, LoadIndexResult } from '@/types/file';
+import type { FileMetadata, IndexMetadata } from '@/types/file';
 import { toast } from '@/components/base/toaster';
 
 const LARGE_FILE_THRESHOLD_GB = 50;
@@ -85,47 +85,53 @@ export function useFileDialog() {
 
   /**
    * Try to load existing index, or start new indexation
+   *
+   * Tauri IPC pattern: Ok(T) returns T directly, Err(String) throws JS exception.
+   * We handle different error cases by parsing the error message.
    */
   const startIndexation = async (filePath: string, fileSize: number) => {
+    setLoading(true);
+    setCurrentFile({
+      path: filePath,
+      size: fileSize,
+      format: 'UNKNOWN', // Will be determined by parser
+      selectedAt: new Date(),
+    });
+
     try {
-      setLoading(true);
-      setCurrentFile({
-        path: filePath,
-        size: fileSize,
-        format: 'UNKNOWN', // Will be determined by parser
-        selectedAt: new Date(),
-      });
-
       // Try to load existing index first (Story 1.4)
-      const loadResult = await invoke<LoadIndexResult>('load_index_file', { filePath });
+      // On success, Tauri returns IndexMetadata directly
+      const metadata = await invoke<IndexMetadata>('load_index_file', { filePath });
 
-      if (loadResult.type === 'Success') {
-        // Existing index found and valid
-        setIndexMetadata({
-          sourceFileHash: '', // Not needed for UI
-          entryCount: loadResult.metadata.entryCount,
-          format: loadResult.metadata.logFormat,
-          indexSizeBytes: 0, // Not needed for UI
-          createdAt: new Date().toISOString(),
-        });
-        toast.success('Using existing index');
+      // Existing index found and valid
+      setIndexMetadata({
+        sourceFileHash: metadata.sourceFileHash || '',
+        entryCount: metadata.entryCount,
+        format: metadata.format,
+        indexSizeBytes: metadata.indexSizeBytes || 0,
+        createdAt: metadata.createdAt || new Date().toISOString(),
+      });
+      setLoading(false);
+      toast.success('Using existing index');
+    } catch (error) {
+      // Tauri Err(String) becomes JS exception
+      const errorMessage = String(error);
+
+      // Case 1: No saved index found - proceed with new indexation
+      if (errorMessage.includes('No saved index')) {
+        await performIndexation(filePath);
         return;
       }
 
-      if (loadResult.type === 'HashMismatch') {
-        // File has been modified since last index
+      // Case 2: File has been modified since last index - show dialog
+      if (errorMessage.includes('modified since indexing')) {
         setPendingFile({ path: filePath, size: fileSize });
         setShowHashMismatchDialog(true);
         setLoading(false);
         return;
       }
 
-      // NotFound - proceed with new indexation
-      await performIndexation(filePath);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to open file';
-
-      // Check if error is corruption
+      // Case 3: Index file corrupted - show dialog
       if (errorMessage.includes('corrupted') || errorMessage.includes('Checksum')) {
         setPendingFile({ path: filePath, size: fileSize });
         setShowCorruptionDialog(true);
@@ -133,6 +139,7 @@ export function useFileDialog() {
         return;
       }
 
+      // Case 4: Unknown error
       setLoading(false);
       setError(errorMessage);
       toast.error(`Failed to open file: ${errorMessage}`);

@@ -114,16 +114,15 @@ pub async fn index_file(
         stats.total_lines
     );
 
-    // TODO Story 1.3: Calculate SHA-256 hash of source file
-    // TODO Story 1.3: Create index with entries and persist to disk
-    // For now, return metadata with parsed entry count
+    // Note: This function is for basic parsing without persistence.
+    // Use build_hybrid_index for full indexation with SHA-256 and disk persistence.
     let created_at = chrono::Utc::now().to_rfc3339();
 
     Ok(IndexMetadata {
-        source_file_hash: "pending".to_string(), // Will be calculated in Story 1.3
+        source_file_hash: "pending".to_string(), // Use build_hybrid_index for actual hash
         entry_count: entries.len() as u64,
         format: format_str.to_string(),
-        index_size_bytes: 0, // Will be calculated in Story 1.3
+        index_size_bytes: 0, // Use build_hybrid_index for actual size
         created_at,
         parsing_stats: Some(crate::types::ParsingStats {
             total_lines: stats.total_lines,
@@ -210,12 +209,12 @@ pub async fn index_file_with_format(
         format
     );
 
-    // TODO Story 1.3: Calculate SHA-256 hash of source file
-    // TODO Story 1.3: Create index with entries and persist to disk
+    // Note: This function is for basic parsing without persistence.
+    // Use build_hybrid_index for full indexation with SHA-256 and disk persistence.
     let created_at = chrono::Utc::now().to_rfc3339();
 
     Ok(IndexMetadata {
-        source_file_hash: "pending".to_string(),
+        source_file_hash: "pending".to_string(), // Use build_hybrid_index for actual hash
         entry_count: entries.len() as u64,
         format,
         index_size_bytes: 0,

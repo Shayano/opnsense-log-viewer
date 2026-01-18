@@ -71,9 +71,11 @@ export interface SourceFileMetadata {
 }
 
 /**
- * Result from load_index_file command
+ * Note: load_index_file command uses Tauri Result pattern:
+ * - Success: Returns IndexMetadata directly
+ * - NotFound: Throws error with message containing "No saved index"
+ * - HashMismatch: Throws error with message containing "modified since indexing"
+ * - Corruption: Throws error with message containing "corrupted" or "Checksum"
+ *
+ * Handle via try/catch and parse error message to determine case.
  */
-export type LoadIndexResult =
-  | { type: 'Success'; metadata: SourceFileMetadata }
-  | { type: 'NotFound' }
-  | { type: 'HashMismatch'; storedHash: string; actualHash: string };
