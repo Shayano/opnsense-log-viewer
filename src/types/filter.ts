@@ -38,12 +38,31 @@ export interface Filter {
   logic?: LogicOperator;               // Logic to next filter (undefined for last filter)
 }
 
+// NEW for Story 2.3 - Saved filter definition
+export interface SavedFilter {
+  id: string;                          // Unique ID for saved filter
+  name: string;                        // User-provided name (e.g., "Nightly Port 443 Blocks")
+  filters: Omit<Filter, 'id'>[];      // Filter configurations (without runtime IDs)
+  timestamp: number;                   // Creation timestamp (for FIFO eviction)
+}
+
 export interface FilterState {
+  // Active filters (from Story 2.1)
   filters: Filter[];
   draftMode: boolean;                  // true = filters not executed, false = active query
+
+  // Saved filters (NEW for Story 2.3)
+  savedFilters: SavedFilter[];
+
+  // Actions - Active filters (from Story 2.1)
   addFilter: (filter: Omit<Filter, 'id'>) => void;
   removeFilter: (id: string) => void;
   updateFilter: (id: string, updates: Partial<Filter>) => void;
   clearFilters: () => void;
   setDraftMode: (draft: boolean) => void;
+
+  // Actions - Saved filters (NEW for Story 2.3)
+  saveFilter: (name: string) => void;
+  loadFilter: (savedFilterId: string) => void;
+  deleteSavedFilter: (savedFilterId: string) => void;
 }

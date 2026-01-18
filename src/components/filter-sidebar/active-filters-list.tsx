@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { useFilterStore } from '@/stores/filter-store';
 import { FilterRow } from './filter-row';
+import { ClearFiltersConfirmDialog } from './clear-confirm-dialog';
+import toast from 'react-hot-toast';
 import type { Filter } from '@/types/filter';
 
 interface ActiveFiltersListProps {
@@ -9,6 +12,13 @@ interface ActiveFiltersListProps {
 export function ActiveFiltersList({ onEditFilter }: ActiveFiltersListProps): JSX.Element {
   const filters = useFilterStore((state) => state.filters);
   const clearFilters = useFilterStore((state) => state.clearFilters);
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
+
+  const handleClearConfirm = (): void => {
+    clearFilters();
+    toast.success('All filters cleared');
+    setClearDialogOpen(false);
+  };
 
   if (filters.length === 0) {
     return (
@@ -21,28 +31,37 @@ export function ActiveFiltersList({ onEditFilter }: ActiveFiltersListProps): JSX
   }
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">
-          Active Filters ({filters.length})
-        </h3>
-        <button
-          onClick={clearFilters}
-          className="text-xs text-red-600 dark:text-red-400 hover:underline"
-          aria-label="Clear all filters"
-        >
-          Clear All
-        </button>
+    <>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">
+            Active Filters ({filters.length})
+          </h3>
+          <button
+            onClick={() => setClearDialogOpen(true)}
+            className="text-xs text-red-600 dark:text-red-400 hover:underline"
+            aria-label="Clear all filters"
+          >
+            Clear All
+          </button>
+        </div>
+
+        {filters.map((filter, index) => (
+          <FilterRow
+            key={filter.id}
+            filter={filter}
+            showLogic={index < filters.length - 1}
+            onEdit={onEditFilter}
+          />
+        ))}
       </div>
 
-      {filters.map((filter, index) => (
-        <FilterRow
-          key={filter.id}
-          filter={filter}
-          showLogic={index < filters.length - 1}
-          onEdit={onEditFilter}
-        />
-      ))}
-    </div>
+      {/* Clear All Confirmation Dialog */}
+      <ClearFiltersConfirmDialog
+        isOpen={clearDialogOpen}
+        onConfirm={handleClearConfirm}
+        onCancel={() => setClearDialogOpen(false)}
+      />
+    </>
   );
 }

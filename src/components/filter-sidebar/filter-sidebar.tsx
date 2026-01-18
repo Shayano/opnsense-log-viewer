@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Filter as FilterIcon, Search, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter as FilterIcon, Search, Loader2, Save } from 'lucide-react';
 import { useFilterStore } from '@/stores/filter-store';
 import { useQueryStore } from '@/stores/query-store';
 import { FilterBuilder } from '@/components/filter-builder';
 import { ActiveFiltersList } from './active-filters-list';
+import { SavedFiltersSection } from './saved-filters-section';
+import { SaveFilterModal } from './save-filter-modal';
 import { executeQuery } from '@/utils/query-client';
 import toast from 'react-hot-toast';
 import type { Filter } from '@/types/filter';
@@ -11,6 +13,7 @@ import type { Filter } from '@/types/filter';
 export function FilterSidebar(): JSX.Element {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [editingFilter, setEditingFilter] = useState<Filter | null>(null);
 
   const filters = useFilterStore((state) => state.filters);
@@ -33,18 +36,21 @@ export function FilterSidebar(): JSX.Element {
     localStorage.setItem('filter-sidebar-collapsed', String(newState));
   };
 
-  // Keyboard shortcut: Ctrl/Cmd+B to toggle
+  // Keyboard shortcut: Ctrl/Cmd+B to toggle, Ctrl/Cmd+S to save filter
   useEffect(() => {
     const handleKeyboard = (e: KeyboardEvent): void => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
         e.preventDefault();
         toggleCollapse();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 's' && filters.length > 0) {
+        e.preventDefault();
+        setIsSaveModalOpen(true);
       }
     };
 
     window.addEventListener('keydown', handleKeyboard);
     return () => window.removeEventListener('keydown', handleKeyboard);
-  }, [toggleCollapse]);
+  }, [toggleCollapse, filters.length]);
 
   const handleSearch = async (): Promise<void> => {
     if (filters.length === 0) {
@@ -135,8 +141,8 @@ export function FilterSidebar(): JSX.Element {
           </button>
         </div>
 
-        {/* Add Filter Button */}
-        <div className="p-4">
+        {/* Action Buttons */}
+        <div className="p-4 space-y-2">
           <button
             onClick={handleAddFilter}
             className="w-full px-4 py-2 text-sm font-medium text-white bg-blue-600
@@ -145,11 +151,30 @@ export function FilterSidebar(): JSX.Element {
           >
             Add Filter
           </button>
+
+          {/* Save Filter Button (NEW for Story 2.3) */}
+          {filters.length > 0 && (
+            <button
+              onClick={() => setIsSaveModalOpen(true)}
+              className="w-full px-4 py-2 text-sm font-medium text-blue-600 dark:text-blue-400
+                bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50
+                active:scale-95 rounded transition-all flex items-center justify-center gap-2"
+              title="Save current filters (Ctrl/Cmd+S)"
+            >
+              <Save className="w-4 h-4" />
+              Save Filter
+            </button>
+          )}
         </div>
 
         {/* Active Filters List */}
-        <div className="flex-1 overflow-auto px-4">
-          <ActiveFiltersList onEditFilter={handleEditFilter} />
+        <div className="flex-1 overflow-auto">
+          <div className="px-4">
+            <ActiveFiltersList onEditFilter={handleEditFilter} />
+          </div>
+
+          {/* Saved Filters Section (NEW for Story 2.3) */}
+          <SavedFiltersSection />
         </div>
 
         {/* Search Button (Draft Mode) */}
@@ -180,7 +205,7 @@ export function FilterSidebar(): JSX.Element {
         )}
       </div>
 
-      {/* Filter Builder Modal */}
+      {/* Modals */}
       <FilterBuilder
         isOpen={isBuilderOpen}
         onClose={handleCloseBuilder}
@@ -191,6 +216,7 @@ export function FilterSidebar(): JSX.Element {
           value: editingFilter.value,
         } : null}
       />
+      <SaveFilterModal isOpen={isSaveModalOpen} onClose={() => setIsSaveModalOpen(false)} />
     </>
   );
 }
