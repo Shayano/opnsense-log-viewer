@@ -22,8 +22,8 @@ export function SaveFilterModal({ isOpen, onClose }: SaveFilterModalProps) {
       return;
     }
 
-    // Check for duplicate names
-    const isDuplicate = savedFilters.some((sf) => sf.name === trimmedName);
+    // Check for duplicate names (case-insensitive)
+    const isDuplicate = savedFilters.some((sf) => sf.name.toLowerCase() === trimmedName.toLowerCase());
     if (isDuplicate) {
       setError('A filter with this name already exists');
       return;

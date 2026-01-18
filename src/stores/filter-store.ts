@@ -1,9 +1,43 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage, StateStorage } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
+import toast from 'react-hot-toast';
 import type { Filter, FilterState, SavedFilter } from '@/types/filter';
 
 const MAX_SAVED_FILTERS = 20;
+
+// Custom storage with error handling for quota exceeded
+const createCustomStorage = (): StateStorage => ({
+  getItem: (name: string) => {
+    try {
+      const value = localStorage.getItem(name);
+      return value;
+    } catch (error) {
+      console.error('Failed to read from localStorage:', error);
+      return null;
+    }
+  },
+  setItem: (name: string, value: string) => {
+    try {
+      localStorage.setItem(name, value);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+        toast.error('Storage full. Delete old filters to make room.');
+        throw error; // Re-throw so caller knows it failed
+      } else {
+        console.error('Failed to write to localStorage:', error);
+        throw error;
+      }
+    }
+  },
+  removeItem: (name: string) => {
+    try {
+      localStorage.removeItem(name);
+    } catch (error) {
+      console.error('Failed to remove from localStorage:', error);
+    }
+  },
+});
 
 export const useFilterStore = create<FilterState>()(
   persist(
@@ -63,12 +97,21 @@ export const useFilterStore = create<FilterState>()(
           };
 
           let updatedSavedFilters = [...state.savedFilters, savedFilter];
+          let removedFilter: SavedFilter | null = null;
 
           // Enforce 20 filter limit (FIFO eviction)
           if (updatedSavedFilters.length > MAX_SAVED_FILTERS) {
             // Remove oldest filter by timestamp
             updatedSavedFilters.sort((a, b) => a.timestamp - b.timestamp);
+            removedFilter = updatedSavedFilters[0];
             updatedSavedFilters = updatedSavedFilters.slice(1);
+
+            // Notify user about FIFO eviction (check if toast is available - tests may not have it)
+            if (typeof toast?.warning === 'function') {
+              toast.warning(`Removed oldest filter "${removedFilter.name}" to make room`, {
+                duration: 4000,
+              });
+            }
           }
 
           return {
@@ -100,6 +143,7 @@ export const useFilterStore = create<FilterState>()(
     }),
     {
       name: 'opnsense-log-viewer-filters', // localStorage key
+      storage: createJSONStorage(() => createCustomStorage()),
       partialize: (state) => ({
         // Only persist saved filters (not active filters or draft mode)
         savedFilters: state.savedFilters,

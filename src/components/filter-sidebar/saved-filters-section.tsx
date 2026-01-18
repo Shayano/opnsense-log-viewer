@@ -60,7 +60,7 @@ export function SavedFiltersSection() {
 
         {/* Saved Filters List */}
         {isExpanded && (
-          <div className="mt-2 px-4 space-y-2">
+          <div className="mt-2 px-4 space-y-2" aria-live="polite" aria-atomic="false">
             {savedFilters.length === 0 ? (
               <div className="text-center py-4 text-sm text-gray-500 dark:text-gray-400">
                 No saved filters yet.
@@ -80,7 +80,7 @@ export function SavedFiltersSection() {
                         {savedFilter.name}
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        {savedFilter.filters.length} filter{savedFilter.filters.length > 1 ? 's' : ''}
+                        {savedFilter.filters.length} filters
                       </div>
                     </div>
 
