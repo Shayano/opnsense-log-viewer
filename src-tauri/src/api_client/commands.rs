@@ -1,10 +1,10 @@
 use tauri::{command, AppHandle, Emitter, State};
-use crate::api_client::types::{AliasMapping, ApiCredentials, ConnectionTestResult, InterfaceMappingCache};
+use crate::api_client::types::{AliasMapping, ApiCredentials, ConnectionInfo, ConnectionStatus, ConnectionTestResult, InterfaceMappingCache};
 use crate::api_client::client::test_connection;
 use crate::api_client::enrichment::{fetch_aliases_batch, fetch_interface_mappings, fetch_rule_labels_batch};
 use crate::credentials::{manager, encrypted_storage};
 use crate::state::EnrichmentCacheState;
-use tracing::{info, warn};
+use log::{info, warn};
 use std::collections::HashMap;
 
 /// Save API credentials to OS keychain (with encrypted fallback)
@@ -280,4 +280,46 @@ pub fn get_alias(
     ip: String,
 ) -> Option<Vec<AliasMapping>> {
     cache_state.get_alias(&ip)
+}
+
+// ============================================================================
+// Connection Management Commands (Story 3.5)
+// ============================================================================
+
+/// Get current API connection status
+#[command]
+pub fn get_connection_status(
+    cache_state: State<'_, EnrichmentCacheState>,
+) -> ConnectionInfo {
+    cache_state.get_connection_info()
+}
+
+/// Manually retry API connection
+#[command]
+pub async fn retry_api_connection(
+    cache_state: State<'_, EnrichmentCacheState>,
+) -> Result<ConnectionInfo, String> {
+    info!("Manual connection retry requested");
+
+    // Load credentials
+    let credentials = manager::load_credentials()
+        .ok()
+        .flatten()
+        .or_else(|| encrypted_storage::decrypt_and_load().ok().flatten())
+        .ok_or("No API credentials saved. Please configure OPNsense API connection first.")?;
+
+    // Attempt connection test
+    match test_connection(&credentials).await {
+        Ok(_) => {
+            info!("Connection retry succeeded");
+            cache_state.set_connection_status(ConnectionStatus::Connected, None);
+            Ok(cache_state.get_connection_info())
+        }
+        Err(e) => {
+            warn!("Connection retry failed: {}", e);
+            let error_msg = format!("Connection failed: {}", e);
+            cache_state.set_connection_status(ConnectionStatus::Disconnected, Some(error_msg.clone()));
+            Err(error_msg)
+        }
+    }
 }

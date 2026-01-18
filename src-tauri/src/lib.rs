@@ -22,6 +22,45 @@ fn greet(name: &str) -> String {
 pub fn run() {
     // Initialize enrichment cache state
     let enrichment_cache = state::EnrichmentCacheState::new();
+    let cache_clone = enrichment_cache.clone();
+
+    // Spawn background health check task (Story 3.5)
+    tokio::spawn(async move {
+        use tokio::time::{interval, Duration};
+        use log::{debug, info};
+
+        let mut interval_timer = interval(Duration::from_secs(30));
+
+        loop {
+            interval_timer.tick().await;
+
+            // Only attempt reconnect if currently disconnected
+            if !cache_clone.is_connected() {
+                debug!("Background health check: attempting reconnect");
+
+                // Load credentials
+                if let Some(credentials) = credentials::manager::load_credentials()
+                    .ok()
+                    .flatten()
+                    .or_else(|| credentials::encrypted_storage::decrypt_and_load().ok().flatten())
+                {
+                    // Attempt silent reconnection
+                    match api_client::client::test_connection(&credentials).await {
+                        Ok(_) => {
+                            info!("Background reconnection succeeded");
+                            cache_clone.set_connection_status(
+                                api_client::types::ConnectionStatus::Connected,
+                                None
+                            );
+                        }
+                        Err(e) => {
+                            debug!("Background reconnection failed: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+    });
 
     tauri::Builder::default()
         .manage(enrichment_cache) // Register enrichment cache state
@@ -53,7 +92,10 @@ pub fn run() {
             // Story 3.4: Alias Resolution
             api_client::commands::fetch_aliases,
             api_client::commands::get_aliases,
-            api_client::commands::get_alias
+            api_client::commands::get_alias,
+            // Story 3.5: Connection Management
+            api_client::commands::get_connection_status,
+            api_client::commands::retry_api_connection
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

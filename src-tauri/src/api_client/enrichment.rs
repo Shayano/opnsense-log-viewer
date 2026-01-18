@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use tokio::task::JoinSet;
 use tokio::sync::Semaphore;
 use std::sync::Arc;
+use log::{debug, info, warn, error};
 
 use crate::api_client::client::build_api_client;
 use crate::api_client::types::{
@@ -31,7 +32,7 @@ pub async fn fetch_interface_mappings(
         credentials.endpoint_url
     );
 
-    tracing::debug!("Fetching interface mappings from OPNsense API");
+    debug!("Fetching interface mappings from OPNsense API");
 
     let response = client
         .get(&url)
@@ -63,7 +64,7 @@ pub async fn fetch_interface_mappings(
         })
         .collect();
 
-    tracing::info!("Fetched {} interface mappings", normalized_mappings.len());
+    info!("Fetched {} interface mappings", normalized_mappings.len());
     Ok(normalized_mappings)
 }
 
@@ -96,7 +97,7 @@ async fn fetch_rule_label(
 
     let url = format!("{}/api/firewall/filter/searchRule", credentials.endpoint_url);
 
-    tracing::debug!("Fetching rule label for hash: {}", rule_hash);
+    debug!("Fetching rule label for hash: {}", rule_hash);
 
     let request_body = serde_json::json!({
         "current": 1,
@@ -147,7 +148,7 @@ pub async fn fetch_rule_labels_batch(
     credentials: &ApiCredentials,
     rule_hashes: Vec<String>,
 ) -> Result<HashMap<String, String>> {
-    tracing::info!("Fetching {} rule labels in batch", rule_hashes.len());
+    info!("Fetching {} rule labels in batch", rule_hashes.len());
 
     // Limit concurrent requests to 10 to avoid overwhelming OPNsense API
     const MAX_CONCURRENT_REQUESTS: usize = 10;
@@ -167,7 +168,7 @@ pub async fn fetch_rule_labels_batch(
             let _permit = match sem.acquire().await {
                 Ok(permit) => permit,
                 Err(_) => {
-                    tracing::error!("Semaphore acquisition failed for hash: {}", hash_clone);
+                    error!("Semaphore acquisition failed for hash: {}", hash_clone);
                     return (hash_clone, Err(anyhow::anyhow!("Semaphore acquisition failed")));
                 }
             };
@@ -188,20 +189,20 @@ pub async fn fetch_rule_labels_batch(
                 success_count += 1;
             }
             Ok((hash, Ok(None))) => {
-                tracing::debug!("Rule label not found for hash: {}", hash);
+                debug!("Rule label not found for hash: {}", hash);
             }
             Ok((hash, Err(e))) => {
-                tracing::warn!("Failed to fetch rule label for {}: {}", hash, e);
+                warn!("Failed to fetch rule label for {}: {}", hash, e);
                 error_count += 1;
             }
             Err(e) => {
-                tracing::error!("Task join error: {}", e);
+                error!("Task join error: {}", e);
                 error_count += 1;
             }
         }
     }
 
-    tracing::info!("Rule label fetch complete: {} found, {} errors", success_count, error_count);
+    info!("Rule label fetch complete: {} found, {} errors", success_count, error_count);
     Ok(labels)
 }
 
@@ -293,7 +294,7 @@ pub async fn fetch_aliases_batch(
     credentials: &ApiCredentials,
     ips: Vec<String>,
 ) -> Result<HashMap<String, Vec<AliasMapping>>> {
-    tracing::info!("Fetching aliases for {} IPs in batch", ips.len());
+    info!("Fetching aliases for {} IPs in batch", ips.len());
 
     const MAX_CONCURRENT_REQUESTS: usize = 10;
     let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS));
@@ -311,7 +312,7 @@ pub async fn fetch_aliases_batch(
             let _permit = match semaphore_clone.acquire().await {
                 Ok(permit) => permit,
                 Err(_) => {
-                    tracing::error!("Semaphore acquisition failed for IP: {}", ip_clone);
+                    error!("Semaphore acquisition failed for IP: {}", ip_clone);
                     return (ip_clone, Err(anyhow::anyhow!("Semaphore acquisition failed")));
                 }
             };
@@ -333,19 +334,19 @@ pub async fn fetch_aliases_batch(
             }
             Ok((ip, Ok(_))) => {
                 // IP not aliased (empty response)
-                tracing::debug!("No aliases found for IP: {}", ip);
+                debug!("No aliases found for IP: {}", ip);
             }
             Ok((ip, Err(e))) => {
-                tracing::warn!("Failed to fetch aliases for {}: {}", ip, e);
+                warn!("Failed to fetch aliases for {}: {}", ip, e);
                 error_count += 1;
             }
             Err(e) => {
-                tracing::error!("Task join error: {}", e);
+                error!("Task join error: {}", e);
                 error_count += 1;
             }
         }
     }
 
-    tracing::info!("Alias fetch complete: {} aliased, {} errors", success_count, error_count);
+    info!("Alias fetch complete: {} aliased, {} errors", success_count, error_count);
     Ok(alias_map)
 }

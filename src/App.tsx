@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { ThemeToggle } from './components/theme-toggle';
@@ -8,9 +8,12 @@ import { ComponentShowcase } from './pages/component-showcase';
 import { FileSelector, FileError } from './components/file-selector';
 import { FilterSidebar } from './components/filter-sidebar';
 import { SettingsDialog } from './components/settings-dialog';
+import { OfflineBanner } from './components/api-status/offline-banner';
+import { ConnectionIndicator } from './components/api-status/connection-indicator';
 import { loadApiCredentials, testApiConnection } from './utils/api-client';
 import { useEnrichmentStore } from './stores/enrichment-store';
 import { loadCachedRuleLabels } from './services/enrichment-service';
+import toast from 'react-hot-toast';
 
 interface InterfaceMappingCache {
   mappings: Record<string, string>;
@@ -20,6 +23,8 @@ interface InterfaceMappingCache {
 
 function App() {
   const setInterfaceMappings = useEnrichmentStore((state) => state.setInterfaceMappings);
+  const setConnectionStatus = useEnrichmentStore((state) => state.setConnectionStatus);
+  const connectionStatus = useEnrichmentStore((state) => state.connectionStatus);
 
   // Story 3.1: Auto-load credentials on app startup (AC requirement)
   useEffect(() => {
@@ -44,6 +49,39 @@ function App() {
 
     autoLoadCredentials();
   }, []);
+
+  // Story 3.5: Connection status polling
+  const pollConnectionStatus = useCallback(async () => {
+    try {
+      const info = await invoke<any>('get_connection_status');
+      const previousStatus = connectionStatus;
+      setConnectionStatus(info);
+
+      // Show toast on status changes
+      if (previousStatus && previousStatus !== info.status) {
+        if (info.status === 'connected' && previousStatus === 'disconnected') {
+          toast.success('API reconnected. Enrichment resumed.');
+        } else if (info.status === 'disconnected' && previousStatus === 'connected') {
+          toast('API connection lost. Using cached enrichment data.', {
+            icon: '⚠️',
+            duration: 5000,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to poll connection status:', error);
+    }
+  }, [setConnectionStatus, connectionStatus]);
+
+  useEffect(() => {
+    // Initial status check
+    pollConnectionStatus();
+
+    // Setup polling interval (every 10 seconds)
+    const interval = setInterval(pollConnectionStatus, 10000);
+
+    return () => clearInterval(interval);
+  }, [pollConnectionStatus]);
 
   // Story 3.2: Auto-load interface mappings on app startup
   useEffect(() => {
@@ -85,10 +123,15 @@ function App() {
   return (
     <div className="min-h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col">
       <Toaster />
+      {/* Story 3.5: Offline Banner */}
+      <OfflineBanner />
+
       <header className="border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex-shrink-0">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-semibold">OPNsense Log Viewer</h1>
           <div className="flex items-center gap-2">
+            {/* Story 3.5: Connection Status Indicator */}
+            <ConnectionIndicator />
             <SettingsDialog />
             <ThemeToggle />
           </div>

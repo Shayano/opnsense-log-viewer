@@ -17,10 +17,21 @@ pub struct ApiCredentials {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ConnectionStatus {
-    Disconnected,
-    Connecting,
+    /// API is reachable and working
     Connected,
-    Error,
+    /// API is unreachable or credentials invalid
+    Disconnected,
+    /// API partially working (some calls timing out)
+    Degraded,
+}
+
+/// Connection status with metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionInfo {
+    pub status: ConnectionStatus,
+    pub last_error: Option<String>,
+    pub last_checked: DateTime<Utc>,
 }
 
 /// Result from test connection

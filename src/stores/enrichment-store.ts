@@ -13,6 +13,15 @@ interface AliasMapping {
   aliasType?: string;
 }
 
+// Story 3.5: Connection status types
+type ConnectionStatus = 'connected' | 'disconnected' | 'degraded';
+
+interface ConnectionInfo {
+  status: ConnectionStatus;
+  lastError: string | null;
+  lastChecked: string; // ISO 8601 timestamp
+}
+
 interface EnrichmentStore {
   // Interface mappings
   interfaceMappings: Map<string, string>; // physical → logical
@@ -43,6 +52,16 @@ interface EnrichmentStore {
   getAliasesForIP: (ip: string) => AliasMapping[] | null;
   addAlias: (ip: string, aliases: AliasMapping[]) => void;
   clearAliases: () => void;
+
+  // Connection status (Story 3.5)
+  connectionStatus: ConnectionStatus | null;
+  lastError: string | null;
+  lastChecked: Date | null;
+
+  // Connection actions
+  setConnectionStatus: (info: ConnectionInfo) => void;
+  clearError: () => void;
+  isConnected: () => boolean;
 }
 
 export const useEnrichmentStore = create<EnrichmentStore>((set, get) => ({
@@ -158,5 +177,34 @@ export const useEnrichmentStore = create<EnrichmentStore>((set, get) => ({
       aliases: new Map(),
       aliasesLastUpdated: null,
     });
+  },
+
+  // ============================================================================
+  // Connection Status (Story 3.5)
+  // ============================================================================
+
+  // Initial connection status
+  connectionStatus: null,
+  lastError: null,
+  lastChecked: null,
+
+  // Set connection status from backend
+  setConnectionStatus: (info) => {
+    set({
+      connectionStatus: info.status,
+      lastError: info.lastError,
+      lastChecked: info.lastChecked ? new Date(info.lastChecked) : null,
+    });
+  },
+
+  // Clear error message
+  clearError: () => {
+    set({ lastError: null });
+  },
+
+  // Check if currently connected
+  isConnected: () => {
+    const { connectionStatus } = get();
+    return connectionStatus === 'connected';
   },
 }));

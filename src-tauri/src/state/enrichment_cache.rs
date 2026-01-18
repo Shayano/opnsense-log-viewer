@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
+use log::debug;
 
-use crate::api_client::types::{AliasCache, AliasMapping, InterfaceMappingCache, RuleLabelCache};
+use crate::api_client::types::{AliasCache, AliasMapping, ConnectionInfo, ConnectionStatus, InterfaceMappingCache, RuleLabelCache};
 
 /// Thread-safe in-memory cache for interface mappings, rule labels, and IP aliases
 #[derive(Clone)]
@@ -14,6 +15,10 @@ pub struct EnrichmentCacheState {
     alias_cache: Arc<Mutex<HashMap<String, Vec<AliasMapping>>>>,
     alias_metadata: Arc<Mutex<Option<DateTime<Utc>>>>,
     device_id: Arc<Mutex<Option<String>>>,
+    // Connection status tracking (Story 3.5)
+    connection_status: Arc<Mutex<ConnectionStatus>>,
+    last_error: Arc<Mutex<Option<String>>>,
+    last_api_check: Arc<Mutex<DateTime<Utc>>>,
 }
 
 impl EnrichmentCacheState {
@@ -25,6 +30,10 @@ impl EnrichmentCacheState {
             alias_cache: Arc::new(Mutex::new(HashMap::new())),
             alias_metadata: Arc::new(Mutex::new(None)),
             device_id: Arc::new(Mutex::new(None)),
+            // Initialize connection status as Disconnected
+            connection_status: Arc::new(Mutex::new(ConnectionStatus::Disconnected)),
+            last_error: Arc::new(Mutex::new(None)),
+            last_api_check: Arc::new(Mutex::new(Utc::now())),
         }
     }
 
@@ -43,7 +52,7 @@ impl EnrichmentCacheState {
         let mut cache_guard = self.interface_cache.lock().unwrap();
         *cache_guard = Some(cache);
 
-        tracing::debug!("Interface mappings cached");
+        debug!("Interface mappings cached");
     }
 
     /// Get logical name for a physical interface
@@ -66,7 +75,7 @@ impl EnrichmentCacheState {
         let mut cache_guard = self.interface_cache.lock().unwrap();
         *cache_guard = None;
 
-        tracing::debug!("Interface mappings cache cleared");
+        debug!("Interface mappings cache cleared");
     }
 
     // ============================================================================
@@ -95,7 +104,7 @@ impl EnrichmentCacheState {
         let mut device = self.device_id.lock().unwrap();
         *device = Some(device_id);
 
-        tracing::debug!("Rule labels cached: {} entries", cache.len());
+        debug!("Rule labels cached: {} entries", cache.len());
     }
 
     /// Get rule label for a specific hash
@@ -129,7 +138,7 @@ impl EnrichmentCacheState {
         let mut metadata = self.rule_label_metadata.lock().unwrap();
         *metadata = None;
 
-        tracing::debug!("Rule label cache cleared");
+        debug!("Rule label cache cleared");
     }
 
     // ============================================================================
@@ -158,7 +167,7 @@ impl EnrichmentCacheState {
         let mut device = self.device_id.lock().unwrap();
         *device = Some(device_id);
 
-        tracing::debug!("Aliases cached: {} IPs", cache.len());
+        debug!("Aliases cached: {} IPs", cache.len());
     }
 
     /// Get aliases for a specific IP
@@ -192,7 +201,43 @@ impl EnrichmentCacheState {
         let mut metadata = self.alias_metadata.lock().unwrap();
         *metadata = None;
 
-        tracing::debug!("Alias cache cleared");
+        debug!("Alias cache cleared");
+    }
+
+    // ============================================================================
+    // Connection Status Methods (Story 3.5)
+    // ============================================================================
+
+    /// Update connection status
+    pub fn set_connection_status(&self, status: ConnectionStatus, error: Option<String>) {
+        let mut status_lock = self.connection_status.lock().unwrap();
+        *status_lock = status;
+
+        let mut error_lock = self.last_error.lock().unwrap();
+        *error_lock = error.clone();
+
+        let mut check_lock = self.last_api_check.lock().unwrap();
+        *check_lock = Utc::now();
+
+        debug!("Connection status updated to {:?}, error: {:?}", status, error);
+    }
+
+    /// Get current connection status with metadata
+    pub fn get_connection_info(&self) -> ConnectionInfo {
+        let status = *self.connection_status.lock().unwrap();
+        let last_error = self.last_error.lock().unwrap().clone();
+        let last_checked = *self.last_api_check.lock().unwrap();
+
+        ConnectionInfo {
+            status,
+            last_error,
+            last_checked,
+        }
+    }
+
+    /// Check if API is currently connected
+    pub fn is_connected(&self) -> bool {
+        *self.connection_status.lock().unwrap() == ConnectionStatus::Connected
     }
 }
 
@@ -363,5 +408,86 @@ mod tests {
         let all_labels = cache.get_all_rule_labels().unwrap();
         assert_eq!(all_labels.mappings.len(), 3);
         assert_eq!(all_labels.device_id, "device2");
+    }
+
+    // ============================================================================
+    // Connection Status Tests (Story 3.5)
+    // ============================================================================
+
+    #[test]
+    fn test_connection_status_tracking() {
+        let cache = EnrichmentCacheState::new();
+
+        // Initial status is disconnected
+        assert_eq!(cache.get_connection_info().status, ConnectionStatus::Disconnected);
+        assert!(!cache.is_connected());
+
+        // Update to connected
+        cache.set_connection_status(ConnectionStatus::Connected, None);
+        assert_eq!(cache.get_connection_info().status, ConnectionStatus::Connected);
+        assert!(cache.is_connected());
+
+        // Update to disconnected with error
+        cache.set_connection_status(
+            ConnectionStatus::Disconnected,
+            Some("Network error".to_string())
+        );
+        let info = cache.get_connection_info();
+        assert_eq!(info.status, ConnectionStatus::Disconnected);
+        assert_eq!(info.last_error.unwrap(), "Network error");
+        assert!(!cache.is_connected());
+    }
+
+    #[test]
+    fn test_connection_status_transitions() {
+        let cache = EnrichmentCacheState::new();
+
+        // Disconnected → Connected
+        cache.set_connection_status(ConnectionStatus::Connected, None);
+        assert_eq!(cache.get_connection_info().status, ConnectionStatus::Connected);
+
+        // Connected → Degraded
+        cache.set_connection_status(
+            ConnectionStatus::Degraded,
+            Some("Some calls timing out".to_string())
+        );
+        assert_eq!(cache.get_connection_info().status, ConnectionStatus::Degraded);
+        assert!(!cache.is_connected()); // Only Connected returns true
+
+        // Degraded → Connected
+        cache.set_connection_status(ConnectionStatus::Connected, None);
+        assert_eq!(cache.get_connection_info().status, ConnectionStatus::Connected);
+        assert!(cache.is_connected());
+    }
+
+    #[test]
+    fn test_connection_info_metadata() {
+        let cache = EnrichmentCacheState::new();
+
+        cache.set_connection_status(
+            ConnectionStatus::Disconnected,
+            Some("Test error".to_string())
+        );
+
+        let info = cache.get_connection_info();
+        assert_eq!(info.status, ConnectionStatus::Disconnected);
+        assert_eq!(info.last_error.unwrap(), "Test error");
+        assert!(info.last_checked <= Utc::now());
+    }
+
+    #[test]
+    fn test_connection_error_clearing() {
+        let cache = EnrichmentCacheState::new();
+
+        // Set error
+        cache.set_connection_status(
+            ConnectionStatus::Disconnected,
+            Some("Error message".to_string())
+        );
+        assert!(cache.get_connection_info().last_error.is_some());
+
+        // Clear error
+        cache.set_connection_status(ConnectionStatus::Connected, None);
+        assert!(cache.get_connection_info().last_error.is_none());
     }
 }
