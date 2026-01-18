@@ -12,9 +12,9 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }));
 
-// Mock react-hot-toast
-vi.mock('react-hot-toast', () => ({
-  default: {
+// Mock toast from base/toaster
+vi.mock('@/components/base/toaster', () => ({
+  toast: {
     success: vi.fn(),
     error: vi.fn(),
   },
@@ -89,7 +89,7 @@ describe('FileSelector', () => {
   it('proceeds with indexation for files under 50GB', async () => {
     const { invoke } = await import('@tauri-apps/api/core');
     const { open } = await import('@tauri-apps/plugin-dialog');
-    const toast = await import('react-hot-toast');
+    const { toast } = await import('@/components/base/toaster');
     const user = userEvent.setup();
 
     // Mock file selection
@@ -113,7 +113,7 @@ describe('FileSelector', () => {
 
     // Wait for success toast
     await waitFor(() => {
-      expect(toast.default.success).toHaveBeenCalledWith('File indexed successfully');
+      expect(toast.success).toHaveBeenCalledWith('File indexed successfully');
     });
 
     // Check that file info is displayed
@@ -126,7 +126,7 @@ describe('FileSelector', () => {
   it('displays error message for unreadable files', async () => {
     const { invoke } = await import('@tauri-apps/api/core');
     const { open } = await import('@tauri-apps/plugin-dialog');
-    const toast = await import('react-hot-toast');
+    const { toast } = await import('@/components/base/toaster');
     const user = userEvent.setup();
 
     // Mock file selection
@@ -141,9 +141,7 @@ describe('FileSelector', () => {
 
     // Wait for error toast
     await waitFor(() => {
-      expect(toast.default.error).toHaveBeenCalledWith(
-        'Failed to open file: Permission denied'
-      );
+      expect(toast.error).toHaveBeenCalledWith('Failed to open file: Permission denied');
     });
   });
 

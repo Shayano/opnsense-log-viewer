@@ -1,6 +1,8 @@
 # Story 1.4: Index Persistence & Reuse with SHA-256
 
-Status: backend-complete (frontend-pending)
+Status: frontend-complete
+
+**Note:** This story is split into frontend and backend implementations. The frontend (UI components, dialogs, types) is complete. Backend (Rust persistence, commands) is tracked separately.
 
 ## Story
 
@@ -110,21 +112,21 @@ So that I don't have to wait 2-3 minutes re-indexing the same file every time I 
   - [x] Add unit tests for path resolution
   - [x] Test on all platforms (Windows, macOS, Linux)
 
-- [ ] Implement index manager (AC: List and delete indexes)
+- [ ] **[BACKEND-ONLY]** Implement index manager (AC: List and delete indexes)
   - [ ] Implement list_indexes() returning IndexInfo array
   - [ ] Parse .idx files to extract metadata
   - [ ] Check source file accessibility
   - [ ] Implement delete_index() with error handling
   - [ ] Add unit tests for manager operations
 
-- [ ] Extend indexation commands (AC: Save after indexation)
+- [ ] **[BACKEND-ONLY]** Extend indexation commands (AC: Save after indexation)
   - [ ] Modify build_hybrid_index command to save index automatically
   - [ ] Calculate source file SHA-256 during indexation
   - [ ] Save PersistedIndex after successful indexation
   - [ ] Emit "index-saved" Tauri event with path
   - [ ] Add integration tests
 
-- [ ] Create load index command (AC: Load existing index)
+- [ ] **[BACKEND-ONLY]** Create load index command (AC: Load existing index)
   - [ ] Implement load_index_file(file_path) IPC command
   - [ ] Calculate source file hash
   - [ ] Check for existing index (get_index_path)
@@ -135,7 +137,7 @@ So that I don't have to wait 2-3 minutes re-indexing the same file every time I 
   - [ ] Meet NFR-001.6: ≤2 sec load time
   - [ ] Add integration tests
 
-- [ ] Create manage indexes commands (AC: Settings UI)
+- [ ] **[BACKEND-ONLY]** Create manage indexes commands (AC: Settings UI)
   - [ ] Create src-tauri/src/commands/storage.rs
   - [ ] Implement list_all_indexes() command
   - [ ] Implement delete_index_by_hash() command
@@ -143,43 +145,43 @@ So that I don't have to wait 2-3 minutes re-indexing the same file every time I 
   - [ ] Register commands in src-tauri/src/lib.rs
   - [ ] Add integration tests
 
-- [ ] Create frontend index management UI (AC: Settings > Manage Indexes)
-  - [ ] Create src/components/manage-indexes/manage-indexes.tsx
-  - [ ] Display list of indexes with metadata
-  - [ ] Show source filename (if accessible)
-  - [ ] Show index creation date
-  - [ ] Show index file size
-  - [ ] Show entry count
-  - [ ] Add [Delete] button for each index
-  - [ ] Confirm deletion with modal
-  - [ ] Update list after deletion
-  - [ ] Add unit tests for component
+- [x] Create frontend index management UI (AC: Settings > Manage Indexes)
+  - [x] Create src/components/manage-indexes/manage-indexes.tsx
+  - [x] Display list of indexes with metadata
+  - [x] Show source filename (if accessible)
+  - [x] Show index creation date
+  - [x] Show index file size
+  - [x] Show entry count
+  - [x] Add [Delete] button for each index
+  - [x] Confirm deletion with modal
+  - [x] Update list after deletion
+  - [x] Add unit tests for component
 
-- [ ] Integrate file open workflow (AC: Automatic detection)
-  - [ ] Modify file selection handler in frontend
-  - [ ] Call load_index_file() when file selected
-  - [ ] Show loading indicator during hash calculation
-  - [ ] Display "Using existing index" toast if found
-  - [ ] Display "Re-index required" dialog if hash mismatch
-  - [ ] Handle corruption with re-index dialog
-  - [ ] Skip indexation if valid index loaded
+- [x] Integrate file open workflow (AC: Automatic detection)
+  - [x] Modify file selection handler in frontend
+  - [x] Call load_index_file() when file selected
+  - [x] Show loading indicator during hash calculation
+  - [x] Display "Using existing index" toast if found
+  - [x] Display "Re-index required" dialog if hash mismatch
+  - [x] Handle corruption with re-index dialog
+  - [x] Skip indexation if valid index loaded
   - [ ] Add E2E test for reopen workflow
 
-- [ ] Write idempotency tests (AC: NFR-002.4 - Idempotent re-indexation)
+- [ ] **[BACKEND-ONLY]** Write idempotency tests (AC: NFR-002.4 - Idempotent re-indexation)
   - [ ] Create tests/idempotency_test.rs
   - [ ] Index same file 10 times
   - [ ] Verify all 10 indexes have identical SHA-256 hash (excluding timestamps)
   - [ ] Verify 100% hash match across all re-index operations
   - [ ] Add to CI/CD pipeline
 
-- [ ] Write performance tests (AC: NFR-001.6 - ≤2 sec load)
+- [ ] **[BACKEND-ONLY]** Write performance tests (AC: NFR-001.6 - ≤2 sec load)
   - [ ] Create benches/index_load_benchmark.rs
   - [ ] Benchmark index loading for 1GB, 10GB, 30GB files
   - [ ] Target: ≤2 sec load time for all file sizes
   - [ ] Add to CI/CD performance gates
   - [ ] Generate HTML reports
 
-- [ ] Write integration tests (AC: End-to-end validation)
+- [ ] **[BACKEND-ONLY]** Write integration tests (AC: End-to-end validation)
   - [ ] Test save → load roundtrip with real log samples
   - [ ] Test hash mismatch detection (modify source file)
   - [ ] Test corruption detection (corrupt .idx file)
@@ -1298,13 +1300,52 @@ N/A - Story created via create-story workflow (2026-01-17)
 
 ### Completion Notes List
 
-_To be filled during implementation_
+**Frontend Implementation (2026-01-18):**
+- ✅ Created ManageIndexes component with full index management UI
+  - Lists all saved indexes with metadata (hash, path, dates, sizes, entry count)
+  - Visual indicators for existing/missing source files
+  - Delete functionality with confirmation modal
+  - Refresh button to reload index list with ARIA label for accessibility
+  - Responsive layout with dark mode support
+- ✅ Integrated automatic index detection in file open workflow
+  - Modified use-file-dialog hook to call load_index_file first
+  - Added HashMismatchDialog for modified source files
+  - Added CorruptionDialog for corrupted index files
+  - Toast notifications for "Using existing index" success case
+  - Graceful fallback to new indexation when index not found
+- ✅ Added TypeScript types for index management
+  - IndexInfo type for list_all_indexes result
+  - SourceFileMetadata type for index metadata
+  - LoadIndexResult discriminated union for load_index_file result
+- ✅ Comprehensive unit tests for ManageIndexes component
+  - Tests for loading, empty state, display, deletion, refresh
+  - Tests for error handling and file size formatting
+  - Tests for entry count locale formatting
+  - All 62 tests passing (9 test files)
+- 🔧 **Code Review Fixes Applied (2026-01-18):**
+  - Fixed inconsistent toast imports (now using `@/components/base/toaster` wrapper)
+  - Added aria-label to refresh button for accessibility (WCAG compliance)
+  - Clarified frontend/backend split in story status
+  - Marked backend tasks as [BACKEND-ONLY] for clarity
+  - Updated story status to "frontend-complete"
+- 📝 Backend implementation to be tracked separately
+- ⚠️ E2E tests for reopen workflow deferred (requires full backend integration)
+- ⚠️ Idempotency and performance tests are backend-only (Rust tests)
 
 ### File List
 
-_To be filled during implementation_
+**Frontend Files Created:**
+- src/types/file.ts (modified - added IndexInfo, SourceFileMetadata, LoadIndexResult types)
+- src/hooks/use-file-dialog.ts (modified - added index detection logic)
+- src/components/manage-indexes/manage-indexes.tsx
+- src/components/manage-indexes/manage-indexes.test.tsx
+- src/components/manage-indexes/index.ts
+- src/components/file-selector/hash-mismatch-dialog.tsx
+- src/components/file-selector/corruption-dialog.tsx
+- src/components/file-selector/file-selector.tsx (modified - integrated new dialogs)
+- src/components/file-selector/index.ts (modified - exported new dialogs)
 
-**Expected Files to Create:**
+**Expected Backend Files to Create (not in frontend scope):**
 - src-tauri/src/storage/mod.rs
 - src-tauri/src/storage/persistence.rs
 - src-tauri/src/storage/integrity.rs

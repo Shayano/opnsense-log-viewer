@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { useFileStore } from '@/stores/file-store';
-import type { FileMetadata, IndexMetadata } from '@/types/file';
-import toast from 'react-hot-toast';
+import type { FileMetadata, IndexMetadata, LoadIndexResult } from '@/types/file';
+import { toast } from '@/components/base/toaster';
 
 const LARGE_FILE_THRESHOLD_GB = 50;
 const BYTES_PER_GB = 1024 * 1024 * 1024;
@@ -13,6 +13,8 @@ const BYTES_PER_GB = 1024 * 1024 * 1024;
  */
 export function useFileDialog() {
   const [showLargeFileWarning, setShowLargeFileWarning] = useState(false);
+  const [showHashMismatchDialog, setShowHashMismatchDialog] = useState(false);
+  const [showCorruptionDialog, setShowCorruptionDialog] = useState(false);
   const [pendingFile, setPendingFile] = useState<{ path: string; size: number } | null>(null);
 
   const setCurrentFile = useFileStore((state) => state.setCurrentFile);
@@ -82,7 +84,7 @@ export function useFileDialog() {
   };
 
   /**
-   * Start indexation of the selected file
+   * Try to load existing index, or start new indexation
    */
   const startIndexation = async (filePath: string, fileSize: number) => {
     try {
@@ -90,11 +92,58 @@ export function useFileDialog() {
       setCurrentFile({
         path: filePath,
         size: fileSize,
-        format: 'UNKNOWN', // Will be determined by parser in Story 1.3
+        format: 'UNKNOWN', // Will be determined by parser
         selectedAt: new Date(),
       });
 
-      // Call Tauri IPC to index file
+      // Try to load existing index first (Story 1.4)
+      const loadResult = await invoke<LoadIndexResult>('load_index_file', { filePath });
+
+      if (loadResult.type === 'Success') {
+        // Existing index found and valid
+        setIndexMetadata({
+          sourceFileHash: '', // Not needed for UI
+          entryCount: loadResult.metadata.entryCount,
+          format: loadResult.metadata.logFormat,
+          indexSizeBytes: 0, // Not needed for UI
+          createdAt: new Date().toISOString(),
+        });
+        toast.success('Using existing index');
+        return;
+      }
+
+      if (loadResult.type === 'HashMismatch') {
+        // File has been modified since last index
+        setPendingFile({ path: filePath, size: fileSize });
+        setShowHashMismatchDialog(true);
+        setLoading(false);
+        return;
+      }
+
+      // NotFound - proceed with new indexation
+      await performIndexation(filePath);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to open file';
+
+      // Check if error is corruption
+      if (errorMessage.includes('corrupted') || errorMessage.includes('Checksum')) {
+        setPendingFile({ path: filePath, size: fileSize });
+        setShowCorruptionDialog(true);
+        setLoading(false);
+        return;
+      }
+
+      setLoading(false);
+      setError(errorMessage);
+      toast.error(`Failed to open file: ${errorMessage}`);
+    }
+  };
+
+  /**
+   * Perform actual indexation (new index creation)
+   */
+  const performIndexation = async (filePath: string) => {
+    try {
       const metadata = await invoke<IndexMetadata>('index_file', {
         filePath,
         compressionLevel: 1, // Architectural decision: Zstd level 1
@@ -104,17 +153,42 @@ export function useFileDialog() {
       toast.success('File indexed successfully');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Indexation failed';
-      setLoading(false); // Explicitly stop loading on error
+      setLoading(false);
       setError(errorMessage);
       toast.error(`Failed to index file: ${errorMessage}`);
     }
   };
 
+  /**
+   * Confirm re-indexation when hash mismatch
+   */
+  const confirmReindex = async () => {
+    if (!pendingFile) return;
+
+    setShowHashMismatchDialog(false);
+    setLoading(true);
+    await performIndexation(pendingFile.path);
+    setPendingFile(null);
+  };
+
+  /**
+   * Cancel re-indexation (hash mismatch or corruption)
+   */
+  const cancelReindex = () => {
+    setShowHashMismatchDialog(false);
+    setShowCorruptionDialog(false);
+    setPendingFile(null);
+  };
+
   return {
     openDialog,
     showLargeFileWarning,
+    showHashMismatchDialog,
+    showCorruptionDialog,
     largeFileSize: pendingFile?.size,
     confirmLargeFile,
     cancelLargeFile,
+    confirmReindex,
+    cancelReindex,
   };
 }

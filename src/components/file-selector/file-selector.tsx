@@ -4,14 +4,25 @@ import { Button } from '@/components/base/button';
 import { useFileDialog } from '@/hooks/use-file-dialog';
 import { useCurrentFile, useIsLoading } from '@/stores/file-store';
 import { LargeFileWarning } from './large-file-warning';
+import { HashMismatchDialog } from './hash-mismatch-dialog';
+import { CorruptionDialog } from './corruption-dialog';
 
 /**
  * FileSelector component
  * Provides UI for opening log files via native OS file picker
  */
 export function FileSelector() {
-  const { openDialog, showLargeFileWarning, largeFileSize, confirmLargeFile, cancelLargeFile } =
-    useFileDialog();
+  const {
+    openDialog,
+    showLargeFileWarning,
+    showHashMismatchDialog,
+    showCorruptionDialog,
+    largeFileSize,
+    confirmLargeFile,
+    cancelLargeFile,
+    confirmReindex,
+    cancelReindex,
+  } = useFileDialog();
   const currentFile = useCurrentFile();
   const isLoading = useIsLoading();
 
@@ -57,6 +68,18 @@ export function FileSelector() {
         fileSize={largeFileSize || 0}
         onConfirm={confirmLargeFile}
         onCancel={cancelLargeFile}
+      />
+
+      <HashMismatchDialog
+        isOpen={showHashMismatchDialog}
+        onConfirm={confirmReindex}
+        onCancel={cancelReindex}
+      />
+
+      <CorruptionDialog
+        isOpen={showCorruptionDialog}
+        onConfirm={confirmReindex}
+        onCancel={cancelReindex}
       />
     </div>
   );

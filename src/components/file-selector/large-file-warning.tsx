@@ -15,12 +15,7 @@ const BYTES_PER_GB = 1024 * 1024 * 1024;
  * LargeFileWarning component
  * Displays a warning modal for files larger than 50GB
  */
-export function LargeFileWarning({
-  isOpen,
-  fileSize,
-  onConfirm,
-  onCancel,
-}: LargeFileWarningProps) {
+export function LargeFileWarning({ isOpen, fileSize, onConfirm, onCancel }: LargeFileWarningProps) {
   const fileSizeGB = (fileSize / BYTES_PER_GB).toFixed(1);
 
   return (
@@ -30,7 +25,8 @@ export function LargeFileWarning({
           <AlertTriangle className="text-yellow-500 flex-shrink-0" size={24} />
           <div>
             <p className="text-gray-900 dark:text-gray-100">
-              Large file may take extended time to index. File size: <strong>{fileSizeGB} GB</strong>. Continue?
+              Large file may take extended time to index. File size:{' '}
+              <strong>{fileSizeGB} GB</strong>. Continue?
             </p>
           </div>
         </div>
