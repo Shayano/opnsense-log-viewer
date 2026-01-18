@@ -1568,7 +1568,19 @@ N/A - Story created via create-story workflow (2026-01-18)
 
 ### Completion Notes List
 
-(To be filled during implementation)
+**Code Review Fixes Applied (2026-01-18):**
+- ✅ Fixed Cargo.toml dependency versions (reqwest 0.12→0.13.1, middleware 0.4→0.3, retry 0.7→0.6)
+- ✅ Added auto-load credentials in App.tsx with background connection test (AC requirement)
+- ✅ Fixed encrypted storage to use proper app data directory (dirs crate) instead of current_dir
+- ✅ Removed sensitive endpoint URL from debug logs (security)
+
+**Outstanding Items (To Complete Before "Done"):**
+- ⚠️ Unit tests missing: Need comprehensive test coverage (17+ tests identified in story)
+  - Backend: commands.rs tests, mock API tests, retry logic tests
+  - Frontend: api-config-settings.test.tsx component tests
+  - Target: 85%+ backend, 80%+ frontend coverage
+- ⚠️ Security audit: Run `cargo audit` to verify no known vulnerabilities
+- ⚠️ Performance testing: Verify connection timeout (<10s), save/load speed (<500ms/<200ms)
 
 ### File List
 
@@ -1606,7 +1618,7 @@ N/A - Story created via create-story workflow (2026-01-18)
 
 ### Story Completion Status
 
-**Status:** ready-for-dev
+**Status:** in-progress
 
 **Next Steps:**
 1. Add dependencies to src-tauri/Cargo.toml (keyring, reqwest, ring, argon2)

@@ -41,12 +41,13 @@ fn derive_key(device_seed: &str) -> Result<[u8; 32]> {
 
 /// Get encrypted file path
 fn get_encrypted_file_path() -> Result<PathBuf> {
-    let app_data_dir = std::env::current_dir()
-        .context("Failed to get current directory")?
-        .join(".cache");
+    // Use proper app data directory instead of current_dir
+    let app_data_dir = dirs::data_local_dir()
+        .context("Failed to get app data directory")?
+        .join("opnsense-log-viewer");
 
     fs::create_dir_all(&app_data_dir)
-        .context("Failed to create cache directory")?;
+        .context("Failed to create app data directory")?;
 
     Ok(app_data_dir.join(ENCRYPTED_FILE_NAME))
 }

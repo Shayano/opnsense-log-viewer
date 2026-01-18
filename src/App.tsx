@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { ThemeToggle } from './components/theme-toggle';
 import { Toaster } from './components/base';
 import { ErrorBoundary } from './components/error-boundary';
@@ -5,8 +6,33 @@ import { ComponentShowcase } from './pages/component-showcase';
 import { FileSelector, FileError } from './components/file-selector';
 import { FilterSidebar } from './components/filter-sidebar';
 import { SettingsDialog } from './components/settings-dialog';
+import { loadApiCredentials, testApiConnection } from './utils/api-client';
 
 function App() {
+  // Story 3.1: Auto-load credentials on app startup (AC requirement)
+  useEffect(() => {
+    const autoLoadCredentials = async () => {
+      try {
+        const credentials = await loadApiCredentials();
+        if (credentials) {
+          // Silently test connection in background (non-blocking)
+          testApiConnection(
+            credentials.endpointUrl,
+            credentials.apiKey,
+            credentials.apiSecret
+          ).catch(() => {
+            // Silent failure on startup - user can manually test via Settings
+          });
+        }
+      } catch (error) {
+        // Silent failure on first launch (no credentials yet)
+        console.debug('No credentials to auto-load');
+      }
+    };
+
+    autoLoadCredentials();
+  }, []);
+
   return (
     <div className="min-h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col">
       <Toaster />

@@ -37,7 +37,8 @@ pub async fn test_connection(credentials: &ApiCredentials) -> Result<ConnectionT
 
     let url = format!("{}/api/diagnostics/interface/getInterfaceNames", credentials.endpoint_url);
 
-    debug!("Testing connection to {}", credentials.endpoint_url);
+    // Security: Do NOT log endpoint URL (may contain sensitive info)
+    debug!("Testing API connection");
 
     // Make test API call
     let response = client
