@@ -1,4 +1,6 @@
 import { useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { ThemeToggle } from './components/theme-toggle';
 import { Toaster } from './components/base';
 import { ErrorBoundary } from './components/error-boundary';
@@ -7,8 +9,17 @@ import { FileSelector, FileError } from './components/file-selector';
 import { FilterSidebar } from './components/filter-sidebar';
 import { SettingsDialog } from './components/settings-dialog';
 import { loadApiCredentials, testApiConnection } from './utils/api-client';
+import { useEnrichmentStore } from './stores/enrichment-store';
+
+interface InterfaceMappingCache {
+  mappings: Record<string, string>;
+  lastUpdated: string;
+  deviceId: string;
+}
 
 function App() {
+  const setInterfaceMappings = useEnrichmentStore((state) => state.setInterfaceMappings);
+
   // Story 3.1: Auto-load credentials on app startup (AC requirement)
   useEffect(() => {
     const autoLoadCredentials = async () => {
@@ -32,6 +43,38 @@ function App() {
 
     autoLoadCredentials();
   }, []);
+
+  // Story 3.2: Auto-load interface mappings on app startup
+  useEffect(() => {
+    const loadCachedMappings = async () => {
+      try {
+        const cache = await invoke<InterfaceMappingCache | null>('get_interface_mappings_cmd');
+        if (cache) {
+          setInterfaceMappings(cache);
+          console.log('Loaded cached interface mappings:', cache.mappings);
+        }
+      } catch (error) {
+        console.error('Failed to load cached interface mappings:', error);
+      }
+    };
+
+    loadCachedMappings();
+
+    // Listen for interface mappings updates (emitted on successful connection)
+    const unlistenPromise = listen<Record<string, string>>('interface-mappings-updated', (event) => {
+      const mappingsCache = {
+        mappings: event.payload,
+        lastUpdated: new Date().toISOString(),
+        deviceId: 'current', // Device ID not included in event
+      };
+      setInterfaceMappings(mappingsCache);
+      console.log('Interface mappings updated:', event.payload);
+    });
+
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [setInterfaceMappings]);
 
   return (
     <div className="min-h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col">

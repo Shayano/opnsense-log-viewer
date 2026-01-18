@@ -37,7 +37,7 @@ zstd = "0.13.3"
 hex = "0.4"
 
 # Story 3.1: API Connection & Credential Storage
-reqwest = { version = "0.13.1", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 reqwest-middleware = "0.3"
 reqwest-retry = "0.6"
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "sync-secret-service"] }

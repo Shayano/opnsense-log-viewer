@@ -7,6 +7,7 @@ pub mod storage;
 pub mod query;
 mod api_client; // Story 3.1: API client and connection setup
 mod credentials; // Story 3.1: Credential storage
+mod state; // Story 3.2: Application state management
 
 // Re-export types for use in other modules
 pub use types::{FileMetadata, IndexMetadata};
@@ -19,7 +20,11 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize enrichment cache state
+    let enrichment_cache = state::EnrichmentCacheState::new();
+
     tauri::Builder::default()
+        .manage(enrichment_cache) // Register enrichment cache state
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -36,7 +41,11 @@ pub fn run() {
             // Story 3.1: API Connection & Credential Storage
             api_client::commands::save_api_credentials,
             api_client::commands::load_api_credentials,
-            api_client::commands::test_api_connection
+            api_client::commands::test_api_connection,
+            // Story 3.2: Interface Mapping & Enrichment
+            api_client::commands::fetch_interface_mappings_cmd,
+            api_client::commands::get_interface_mappings_cmd,
+            api_client::commands::get_logical_interface_name
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

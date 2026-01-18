@@ -3,6 +3,7 @@ import type { VirtualItem } from '@tanstack/react-virtual';
 import { format } from 'date-fns';
 import type { LogEntry } from '@/types/log-entry';
 import { getActionStyle } from '@/utils/action-colors';
+import { useInterfaceName } from '@/hooks/use-interface-name';
 import type { ColumnVisibility } from './use-responsive-columns';
 
 // Helper to compute grid template columns from visibility
@@ -39,6 +40,11 @@ export const LogTableRow = memo(function LogTableRow({
 }: LogTableRowProps): React.JSX.Element {
   const actionStyle = getActionStyle(entry.action);
   const ActionIcon = actionStyle.icon;
+
+  // Resolve interface name (physical → logical)
+  const { displayName: interfaceDisplayName, tooltipText: interfaceTooltip } = useInterfaceName(
+    entry.interface
+  );
 
   // Memoize grid template columns to avoid recalculating on every render
   const gridTemplateColumns = useMemo(
@@ -93,8 +99,8 @@ export const LogTableRow = memo(function LogTableRow({
       )}
 
       {columnVisibility.interface && (
-        <div className="truncate leading-tight" title={entry.interface} role="gridcell">
-          {entry.interface}
+        <div className="truncate leading-tight" title={interfaceTooltip} role="gridcell">
+          {interfaceDisplayName}
         </div>
       )}
 
