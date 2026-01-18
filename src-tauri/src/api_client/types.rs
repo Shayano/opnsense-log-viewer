@@ -84,3 +84,38 @@ pub struct InterfaceMappingCache {
 /// Response format: { "vtnet0": "lan", "vtnet1": "wan", "vtnet2": "opt1" }
 /// Note: OPNsense returns lowercase logical names, we'll titlecase them
 pub type InterfaceMappingResponse = HashMap<String, String>;
+
+// ============================================================================
+// Rule Label Enrichment Types (Story 3.3)
+// ============================================================================
+
+/// Single rule label mapping from hash to description
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleLabelMapping {
+    pub rule_hash: String,
+    pub description: String,
+    #[serde(default)]
+    pub created_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub is_enabled: bool,
+}
+
+/// Cached rule labels with metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleLabelCache {
+    pub mappings: HashMap<String, String>, // hash → description
+    pub last_updated: DateTime<Utc>,
+    pub device_id: String, // OPNsense endpoint URL
+}
+
+/// OPNsense API response format for /api/firewall/filter/searchRule
+/// Response includes rule object with "descr" field for description
+#[derive(Debug, Deserialize)]
+pub struct RuleLabelResponse {
+    pub uuid: Option<String>,
+    #[serde(rename = "descr")]
+    pub description: Option<String>,
+    pub enabled: Option<String>, // "1" or "0"
+}

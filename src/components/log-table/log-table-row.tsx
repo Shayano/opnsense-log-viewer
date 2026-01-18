@@ -4,6 +4,7 @@ import { format } from 'date-fns';
 import type { LogEntry } from '@/types/log-entry';
 import { getActionStyle } from '@/utils/action-colors';
 import { useInterfaceName } from '@/hooks/use-interface-name';
+import { useRuleLabel } from '@/hooks/use-rule-label';
 import type { ColumnVisibility } from './use-responsive-columns';
 
 // Helper to compute grid template columns from visibility
@@ -44,6 +45,11 @@ export const LogTableRow = memo(function LogTableRow({
   // Resolve interface name (physical → logical)
   const { displayName: interfaceDisplayName, tooltipText: interfaceTooltip } = useInterfaceName(
     entry.interface
+  );
+
+  // Resolve rule label (hash → description)
+  const { displayText: ruleLabelDisplayText, tooltipText: ruleLabelTooltip } = useRuleLabel(
+    entry.ruleLabel
   );
 
   // Memoize grid template columns to avoid recalculating on every render
@@ -157,8 +163,8 @@ export const LogTableRow = memo(function LogTableRow({
       )}
 
       {columnVisibility.ruleLabel && (
-        <div className="truncate leading-tight" title={entry.ruleLabel} role="gridcell">
-          {entry.ruleLabel}
+        <div className="truncate leading-tight" title={ruleLabelTooltip} role="gridcell">
+          {ruleLabelDisplayText}
         </div>
       )}
     </div>

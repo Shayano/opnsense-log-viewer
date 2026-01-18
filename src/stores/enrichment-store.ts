@@ -6,6 +6,12 @@ interface InterfaceMappingCache {
   deviceId: string;
 }
 
+interface RuleLabelCache {
+  mappings: Record<string, string>; // hash → description
+  lastUpdated: string;
+  deviceId: string;
+}
+
 interface EnrichmentStore {
   // Interface mappings
   interfaceMappings: Map<string, string>; // physical → logical
@@ -16,6 +22,16 @@ interface EnrichmentStore {
   setInterfaceMappings: (cache: InterfaceMappingCache) => void;
   getLogicalName: (physicalName: string) => string | null;
   clearInterfaceMappings: () => void;
+
+  // Rule labels (Story 3.3)
+  ruleLabels: Map<string, string>; // hash → description
+  ruleLabelsLastUpdated: Date | null;
+
+  // Rule label actions
+  setRuleLabels: (labels: Record<string, string>) => void;
+  getRuleLabel: (hash: string) => string | null;
+  addRuleLabel: (hash: string, description: string) => void;
+  clearRuleLabels: () => void;
 }
 
 export const useEnrichmentStore = create<EnrichmentStore>((set, get) => ({
@@ -46,6 +62,48 @@ export const useEnrichmentStore = create<EnrichmentStore>((set, get) => ({
       interfaceMappings: new Map(),
       lastUpdated: null,
       deviceId: null,
+    });
+  },
+
+  // ============================================================================
+  // Rule Labels (Story 3.3)
+  // ============================================================================
+
+  // Initial rule label state
+  ruleLabels: new Map(),
+  ruleLabelsLastUpdated: null,
+
+  // Set rule labels from cache or API response
+  setRuleLabels: (labels) => {
+    const labelsMap = new Map(Object.entries(labels));
+    set({
+      ruleLabels: labelsMap,
+      ruleLabelsLastUpdated: new Date(),
+    });
+  },
+
+  // Get rule label for a specific hash
+  getRuleLabel: (hash) => {
+    const { ruleLabels } = get();
+    return ruleLabels.get(hash) || null;
+  },
+
+  // Add single rule label
+  addRuleLabel: (hash, description) => {
+    const { ruleLabels } = get();
+    const updatedLabels = new Map(ruleLabels);
+    updatedLabels.set(hash, description);
+    set({
+      ruleLabels: updatedLabels,
+      ruleLabelsLastUpdated: new Date(),
+    });
+  },
+
+  // Clear all rule labels
+  clearRuleLabels: () => {
+    set({
+      ruleLabels: new Map(),
+      ruleLabelsLastUpdated: null,
     });
   },
 }));

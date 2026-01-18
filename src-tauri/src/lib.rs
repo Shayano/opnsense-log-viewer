@@ -45,7 +45,11 @@ pub fn run() {
             // Story 3.2: Interface Mapping & Enrichment
             api_client::commands::fetch_interface_mappings_cmd,
             api_client::commands::get_interface_mappings_cmd,
-            api_client::commands::get_logical_interface_name
+            api_client::commands::get_logical_interface_name,
+            // Story 3.3: Rule Label Enrichment
+            api_client::commands::fetch_rule_labels,
+            api_client::commands::get_rule_labels,
+            api_client::commands::get_rule_label
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

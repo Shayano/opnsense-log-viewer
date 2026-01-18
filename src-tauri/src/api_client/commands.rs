@@ -1,7 +1,7 @@
 use tauri::{command, AppHandle, Emitter, State};
 use crate::api_client::types::{ApiCredentials, ConnectionTestResult, InterfaceMappingCache};
 use crate::api_client::client::test_connection;
-use crate::api_client::enrichment::fetch_interface_mappings;
+use crate::api_client::enrichment::{fetch_interface_mappings, fetch_rule_labels_batch};
 use crate::credentials::{manager, encrypted_storage};
 use crate::state::EnrichmentCacheState;
 use log::{info, warn};
@@ -184,4 +184,52 @@ pub fn get_logical_interface_name(
     physical_name: String,
 ) -> Option<String> {
     cache_state.get_interface_mapping(&physical_name)
+}
+
+// ============================================================================
+// Rule Label Enrichment Commands (Story 3.3)
+// ============================================================================
+
+/// Fetch rule labels from OPNsense API for given hashes
+#[command]
+pub async fn fetch_rule_labels(
+    cache_state: State<'_, EnrichmentCacheState>,
+    hashes: Vec<String>,
+) -> Result<HashMap<String, String>, String> {
+    // Load credentials
+    let credentials = manager::load_credentials()
+        .ok()
+        .flatten()
+        .or_else(|| encrypted_storage::decrypt_and_load().ok().flatten())
+        .ok_or("No API credentials saved. Please configure OPNsense API connection first.")?;
+
+    // Fetch from API (batch with parallelization)
+    let labels = fetch_rule_labels_batch(&credentials, hashes)
+        .await
+        .map_err(|e| format!("Failed to fetch rule labels: {}", e))?;
+
+    // Store in cache
+    cache_state.set_rule_labels(labels.clone(), credentials.endpoint_url.clone());
+
+    info!("Rule labels fetched and cached: {} entries", labels.len());
+    Ok(labels)
+}
+
+/// Get cached rule labels
+#[command]
+pub fn get_rule_labels(
+    cache_state: State<'_, EnrichmentCacheState>,
+) -> HashMap<String, String> {
+    cache_state.get_all_rule_labels()
+        .map(|cache| cache.mappings)
+        .unwrap_or_default()
+}
+
+/// Get single rule label for specific hash
+#[command]
+pub fn get_rule_label(
+    cache_state: State<'_, EnrichmentCacheState>,
+    hash: String,
+) -> Option<String> {
+    cache_state.get_rule_label(&hash)
 }

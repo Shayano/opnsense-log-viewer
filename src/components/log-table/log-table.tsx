@@ -6,6 +6,7 @@ import { LogTableRow } from './log-table-row';
 import { ContextMenu } from './context-menu';
 import { useResponsiveColumns } from './use-responsive-columns';
 import { EntryDetailView } from '@/components/entry-detail-view';
+import { enrichRuleLabels } from '@/services/enrichment-service';
 
 interface LogTableProps {
   entries: LogEntry[];
@@ -175,6 +176,18 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
       });
     }
   }, [selectedRowIndex, rowVirtualizer]);
+
+  // Auto-enrich rule labels when entries change (Story 3.3)
+  useEffect(() => {
+    if (entries.length > 0) {
+      // Debounce enrichment to avoid excessive API calls
+      const timeoutId = setTimeout(() => {
+        enrichRuleLabels(entries);
+      }, 500);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [entries]);
 
   return (
     <div className="flex flex-col h-full">

@@ -10,6 +10,7 @@ import { FilterSidebar } from './components/filter-sidebar';
 import { SettingsDialog } from './components/settings-dialog';
 import { loadApiCredentials, testApiConnection } from './utils/api-client';
 import { useEnrichmentStore } from './stores/enrichment-store';
+import { loadCachedRuleLabels } from './services/enrichment-service';
 
 interface InterfaceMappingCache {
   mappings: Record<string, string>;
@@ -75,6 +76,11 @@ function App() {
       unlistenPromise.then((unlisten) => unlisten());
     };
   }, [setInterfaceMappings]);
+
+  // Story 3.3: Auto-load rule labels on app startup
+  useEffect(() => {
+    loadCachedRuleLabels();
+  }, []);
 
   return (
     <div className="min-h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col">
