@@ -86,3 +86,4 @@ old_files/
 # Application specific
 config.xml
 test_logs/
+bmad_automated/
