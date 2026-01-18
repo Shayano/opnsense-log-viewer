@@ -87,7 +87,7 @@ development_status:
     2-1-visual-filter-builder-ui: done
     2-2-query-execution-engine-with-boolean-logic: done
     2-3-filter-management-save-load-delete: done # Code Review complete - 13 issues found, 8 fixed, 5 remaining (no component tests, no migration, manual session test needed)
-    2-4-search-history-with-persistence: backlog
+    2-4-search-history-with-persistence: review
     epic-2-retrospective: optional
     epic-3: backlog
     3-1-api-connection-setup-with-credential-storage: backlog

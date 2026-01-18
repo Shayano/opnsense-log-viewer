@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Filter as FilterIcon, Search, Loader2, Save } from 'lucide-react';
 import { useFilterStore } from '@/stores/filter-store';
 import { useQueryStore } from '@/stores/query-store';
+import { useSearchHistoryStore } from '@/stores/search-history-store';
 import { FilterBuilder } from '@/components/filter-builder';
 import { ActiveFiltersList } from './active-filters-list';
 import { SavedFiltersSection } from './saved-filters-section';
+import { SearchHistorySection } from './search-history-section';
 import { SaveFilterModal } from './save-filter-modal';
 import { executeQuery } from '@/utils/query-client';
 import toast from 'react-hot-toast';
@@ -21,6 +23,7 @@ export function FilterSidebar(): JSX.Element {
   const setDraftMode = useFilterStore((state) => state.setDraftMode);
 
   const { setResult, setExecuting, setError, isExecuting } = useQueryStore();
+  const { addSearchToHistory } = useSearchHistoryStore();
 
   // Persist collapsed state in localStorage
   useEffect(() => {
@@ -70,6 +73,15 @@ export function FilterSidebar(): JSX.Element {
       toast.success(
         `Found ${result.matchedCount} of ${result.totalCount} entries (${result.executionTimeMs}ms)`
       );
+
+      // Capture search in history (silent, no toast)
+      addSearchToHistory({
+        filters: filters.map(({ id, ...filter }) => filter), // Strip runtime IDs
+        resultCount: result.matchedCount,
+        totalCount: result.totalCount,
+        executionTimeMs: result.executionTimeMs,
+        sourceFileHash: undefined, // TODO: Get from file store if available
+      });
     } catch (error) {
       setError(String(error));
       toast.error(String(error));
@@ -175,6 +187,9 @@ export function FilterSidebar(): JSX.Element {
 
           {/* Saved Filters Section (NEW for Story 2.3) */}
           <SavedFiltersSection />
+
+          {/* Search History Section (NEW for Story 2.4) */}
+          <SearchHistorySection />
         </div>
 
         {/* Search Button (Draft Mode) */}
