@@ -1,6 +1,10 @@
 pub mod log_entry;
+pub mod persisted_index;
 
 use serde::{Deserialize, Serialize};
+
+// Re-export for convenience
+pub use persisted_index::{PersistedIndex, SourceFileMetadata};
 
 /// Metadata about the indexed file
 #[derive(Serialize, Deserialize, Debug, Clone)]

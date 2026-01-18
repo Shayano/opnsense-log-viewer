@@ -1,8 +1,10 @@
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
 /// Bitmap index for low-cardinality fields (action, protocol, interface)
 /// Uses compressed bitmaps for efficient set operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BitmapIndex {
     actions: HashMap<String, RoaringBitmap>,
     protocols: HashMap<String, RoaringBitmap>,

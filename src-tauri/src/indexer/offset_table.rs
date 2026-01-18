@@ -1,5 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 /// Offset table for random access to raw log lines
 /// Maps entry IDs to byte offsets in the source file
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OffsetTable {
     offsets: Vec<u64>,
 }

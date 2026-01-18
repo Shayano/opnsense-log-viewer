@@ -3,6 +3,7 @@ mod commands;
 pub mod parser; // Parser module - Public for integration tests
 pub mod types;
 pub mod indexer;
+pub mod storage;
 
 // Re-export types for use in other modules
 pub use types::{FileMetadata, IndexMetadata};
@@ -24,7 +25,10 @@ pub fn run() {
             commands::indexation::index_file,
             commands::indexation::index_file_with_format,
             commands::indexation::build_hybrid_index,
-            commands::indexation::cancel_indexation
+            commands::indexation::cancel_indexation,
+            commands::storage::list_all_indexes,
+            commands::storage::delete_index_by_hash,
+            commands::storage::load_index_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

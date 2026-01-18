@@ -1,3 +1,5 @@
+use crate::storage::{get_index_path, save_index};
+use crate::types::persisted_index::{PersistedIndex, SourceFileMetadata};
 use crate::types::{FileMetadata, IndexMetadata};
 use crate::parser::{detect_format, parse_file_streaming};
 use crate::types::log_entry::LogFormat;
@@ -307,6 +309,53 @@ pub async fn build_hybrid_index(
 
     match result {
         Ok(metadata) => {
+            // NEW Story 1.4: Save index to disk
+            let save_result = (|| -> Result<(), String> {
+                // Calculate source file hash (bytes)
+                let source_hash_bytes = hex::decode(&metadata.source_file_hash)
+                    .map_err(|e| format!("Failed to decode hash: {}", e))?;
+
+                let mut hash_array = [0u8; 32];
+                hash_array.copy_from_slice(&source_hash_bytes);
+
+                // Get index from global state
+                let guard = HYBRID_INDEX.lock().unwrap();
+                let hybrid_index = guard.as_ref()
+                    .ok_or("Index not found in global state")?
+                    .clone();
+
+                // Create PersistedIndex
+                let source_metadata = SourceFileMetadata {
+                    file_path: canonical_path.to_string_lossy().to_string(),
+                    file_size: metadata.source_file_size,
+                    entry_count: metadata.entry_count,
+                    log_format: detected_format,
+                };
+
+                let persisted_index = PersistedIndex::new(
+                    hash_array,
+                    source_metadata,
+                    hybrid_index,
+                );
+
+                // Get index path and save
+                let index_path = get_index_path(&app, &hash_array)
+                    .map_err(|e| format!("Failed to get index path: {}", e))?;
+
+                save_index(&persisted_index, &index_path)
+                    .map_err(|e| format!("Failed to save index: {}", e))?;
+
+                // Emit index-saved event
+                let _ = app.emit("index-saved", index_path.to_string_lossy().to_string());
+
+                Ok(())
+            })();
+
+            if let Err(e) = save_result {
+                log::warn!("Failed to save index: {}", e);
+                // Continue anyway - indexation succeeded
+            }
+
             // Emit completion event
             let _ = app.emit("indexation-complete", &metadata);
 
@@ -315,7 +364,7 @@ pub async fn build_hybrid_index(
                 source_file_hash: metadata.source_file_hash,
                 entry_count: metadata.entry_count,
                 format: format_str.to_string(),
-                index_size_bytes: 0, // Will be calculated in Story 1.4
+                index_size_bytes: 0, // Will be calculated later
                 created_at: metadata.created_at.to_rfc3339(),
                 parsing_stats: None,
             })

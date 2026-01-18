@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
 /// Inverted index for high-cardinality fields (IPs, ports)
 /// Maps field values to lists of entry IDs containing that value
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvertedIndex {
     source_ips: HashMap<String, Vec<u64>>,
     dest_ips: HashMap<String, Vec<u64>>,

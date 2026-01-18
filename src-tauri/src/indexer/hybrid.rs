@@ -40,12 +40,19 @@ pub enum IndexError {
     MemoryLimitExceeded(usize),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HybridIndex {
     inverted_index: InvertedIndex,
     bitmap_index: BitmapIndex,
     offset_table: OffsetTable,
     metadata: Option<IndexMetadata>,
+    #[serde(skip)]
+    #[serde(default = "default_cancellation_token")]
     cancellation_token: Arc<AtomicBool>,
+}
+
+fn default_cancellation_token() -> Arc<AtomicBool> {
+    Arc::new(AtomicBool::new(false))
 }
 
 impl Default for HybridIndex {
