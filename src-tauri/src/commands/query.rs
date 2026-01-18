@@ -6,8 +6,8 @@ use log::info;
 
 lazy_static::lazy_static! {
     /// Global state for the hybrid index (shared with indexation commands)
-    /// This is the same index loaded during indexation
-    static ref HYBRID_INDEX: Arc<Mutex<Option<HybridIndex>>> = Arc::new(Mutex::new(None));
+    /// This is the shared index loaded during indexation and storage commands
+    pub static ref HYBRID_INDEX: Arc<Mutex<Option<HybridIndex>>> = Arc::new(Mutex::new(None));
 }
 
 /// Execute a query against the loaded index
@@ -34,13 +34,21 @@ pub async fn execute_query(request: QueryRequest) -> Result<QueryResult, String>
         .as_ref()
         .ok_or_else(|| "Index not loaded. Please open a log file first.".to_string())?;
 
-    // Verify index hash matches (optional validation)
-    // TODO: Add index hash verification
-    // if !request.index_hash.is_empty() && hybrid_index.hash() != request.index_hash {
-    //     return Err("Index hash mismatch. Please reload the log file.".to_string());
-    // }
+    // Verify index hash matches (ensures query runs against correct index)
+    if !request.index_hash.is_empty() {
+        if let Some(index_hash) = hybrid_index.source_file_hash() {
+            if index_hash != request.index_hash {
+                return Err(format!(
+                    "Index hash mismatch. Expected '{}' but loaded index has '{}'. Please reload the log file.",
+                    request.index_hash, index_hash
+                ));
+            }
+        }
+    }
 
     // Create query executor
+    // NOTE: Cloning indexes is necessary because QueryExecutor takes ownership
+    // Future optimization: Make QueryExecutor use references instead
     let mut executor = QueryExecutor::new(
         hybrid_index.inverted_index().clone(),
         hybrid_index.bitmap_index().clone(),
@@ -68,6 +76,7 @@ pub async fn execute_query(request: QueryRequest) -> Result<QueryResult, String>
 ///
 /// This function is called by the indexation commands to make the index
 /// available for queries.
+#[allow(dead_code)]
 pub fn set_hybrid_index(index: HybridIndex) -> Result<(), String> {
     let mut index_guard = HYBRID_INDEX
         .lock()
@@ -78,6 +87,7 @@ pub fn set_hybrid_index(index: HybridIndex) -> Result<(), String> {
 }
 
 /// Clear the global hybrid index
+#[allow(dead_code)]
 pub fn clear_hybrid_index() -> Result<(), String> {
     let mut index_guard = HYBRID_INDEX
         .lock()

@@ -6,7 +6,6 @@ use crate::types::log_entry::LogFormat;
 use crate::indexer::{HybridIndex, IndexProgress};
 use std::fs;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 
 /// Get file metadata (size)
@@ -227,10 +226,8 @@ pub async fn index_file_with_format(
     })
 }
 
-// Global state for cancellation token
-lazy_static::lazy_static! {
-    static ref HYBRID_INDEX: Arc<Mutex<Option<HybridIndex>>> = Arc::new(Mutex::new(None));
-}
+// Import the shared HYBRID_INDEX from query module (shared global state)
+use super::query::HYBRID_INDEX;
 
 /// Build hybrid index (Story 1.3) - with progress events
 #[tauri::command]

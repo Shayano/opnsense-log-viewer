@@ -1,10 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, command};
 
-use crate::indexer::HybridIndex;
 use crate::storage::{calculate_file_hash, get_index_path, get_indexes_dir, load_index};
 use crate::types::IndexMetadata;
 
@@ -125,13 +123,11 @@ pub async fn load_index_file(
         return Err("Source file no longer exists at specified path".to_string());
     }
 
-    // 6. Store in global state for queries (same as build_hybrid_index)
-    lazy_static::lazy_static! {
-        static ref LOADED_INDEX: Arc<Mutex<Option<HybridIndex>>> = Arc::new(Mutex::new(None));
-    }
+    // 6. Store in global state for queries (use shared HYBRID_INDEX)
+    use super::query::HYBRID_INDEX;
 
     {
-        let mut guard = LOADED_INDEX.lock().unwrap();
+        let mut guard = HYBRID_INDEX.lock().unwrap();
         *guard = Some(persisted_index.hybrid_index.clone());
     }
 

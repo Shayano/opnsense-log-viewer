@@ -223,6 +223,11 @@ impl HybridIndex {
             .map(|m| m.entry_count as usize)
             .unwrap_or(0)
     }
+
+    /// Get source file hash
+    pub fn source_file_hash(&self) -> Option<&str> {
+        self.metadata.as_ref().map(|m| m.source_file_hash.as_str())
+    }
 }
 
 #[cfg(test)]
