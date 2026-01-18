@@ -5,6 +5,7 @@ import { LogTableHeader, type SortColumn, type SortDirection } from './log-table
 import { LogTableRow } from './log-table-row';
 import { ContextMenu } from './context-menu';
 import { useResponsiveColumns } from './use-responsive-columns';
+import { EntryDetailView } from '@/components/entry-detail-view';
 
 interface LogTableProps {
   entries: LogEntry[];
@@ -33,6 +34,8 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
   const [sortColumn, setSortColumn] = useState<SortColumn>('timestamp');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
+  const [detailPaneOpen, setDetailPaneOpen] = useState(false);
+  const [selectedEntry, setSelectedEntry] = useState<LogEntry | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
     visible: false,
     position: { x: 0, y: 0 },
@@ -87,12 +90,18 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
   const handleRowSelect = useCallback(
     (index: number): void => {
       setSelectedRowIndex(index);
+      setSelectedEntry(sortedEntries[index]);
+      setDetailPaneOpen(true);
       if (onRowSelect) {
         onRowSelect(sortedEntries[index]);
       }
     },
     [onRowSelect, sortedEntries]
   );
+
+  const handleCloseDetailPane = useCallback((): void => {
+    setDetailPaneOpen(false);
+  }, []);
 
   const handleContextMenu = useCallback((event: React.MouseEvent, entry: LogEntry): void => {
     event.preventDefault();
@@ -228,6 +237,13 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
           onFilterByValue={onFilterByValue}
         />
       )}
+
+      {/* Entry Detail View */}
+      <EntryDetailView
+        entry={selectedEntry}
+        isOpen={detailPaneOpen}
+        onClose={handleCloseDetailPane}
+      />
     </div>
   );
 }

@@ -1,36 +1,67 @@
 # generated: 2026-01-16
+
 # project: opnsense-log-viewer
+
 # project_key: opnsense-log-viewer
+
 # tracking_system: file-system
+
 # story_location: C:\Tools\opnsense-log-viewer\_bmad-output\implementation-artifacts
 
 # STATUS DEFINITIONS:
+
 # ==================
+
 # Epic Status:
+
 #   - backlog: Epic not yet started
+
 #   - in-progress: Epic actively being worked on
+
 #   - done: All stories in epic completed
+
 #
+
 # Epic Status Transitions:
+
 #   - backlog → in-progress: Automatically when first story is created (via create-story)
+
 #   - in-progress → done: Manually when all stories reach 'done' status
+
 #
+
 # Story Status:
+
 #   - backlog: Story only exists in epic file
+
 #   - ready-for-dev: Story file created in stories folder
+
 #   - in-progress: Developer actively working on implementation
+
 #   - review: Ready for code review (via Dev's code-review workflow)
+
 #   - done: Story completed
+
 #
+
 # Retrospective Status:
+
 #   - optional: Can be completed but not required
+
 #   - done: Retrospective has been completed
+
 #
+
 # WORKFLOW NOTES:
+
 # ===============
+
 # - Epic transitions to 'in-progress' automatically when first story is created
+
 # - Stories can be worked in parallel if team capacity allows
+
 # - SM typically creates next story after previous one is 'done' to incorporate learnings
+
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-01-16
@@ -38,46 +69,40 @@ project: opnsense-log-viewer
 project_key: opnsense-log-viewer
 tracking_system: file-system
 story_location: C:\Tools\opnsense-log-viewer\_bmad-output\implementation-artifacts
-
 development_status:
-  epic-0: done
-  0-1-project-scaffolding-with-tauri-react: done
-  0-2-comprehensive-test-infrastructure: done
-  0-3-tailwind-css-design-system-foundation: done
-  epic-0-retrospective: optional
-
-  epic-1: in-progress
-  1-1-file-selection-with-native-os-picker: done
-  1-2-multi-format-log-parser-rfc3164-rfc5424-csv: done
-  1-3-hybrid-index-creation-inverted-bitmap: done
-  1-4-index-persistence-reuse-with-sha256: done  # Code Review #2 complete - all issues fixed
-  1-5-log-entry-display-table-with-virtual-scrolling: done
-  1-6-entry-detail-view-with-copy-functionality: backlog
-  epic-1-retrospective: optional
-
-  epic-2: backlog
-  2-1-visual-filter-builder-ui: backlog
-  2-2-query-execution-engine-with-boolean-logic: backlog
-  2-3-filter-management-save-load-delete: backlog
-  2-4-search-history-with-persistence: backlog
-  epic-2-retrospective: optional
-
-  epic-3: backlog
-  3-1-api-connection-setup-with-credential-storage: backlog
-  3-2-interface-name-mapping-physical-to-logical: backlog
-  3-3-rule-label-enrichment-hash-to-description: backlog
-  3-4-alias-resolution-ip-groups: backlog
-  3-5-graceful-degradation-offline-mode: backlog
-  epic-3-retrospective: optional
-
-  epic-4: backlog
-  4-1-enrichment-data-export-to-json: backlog
-  4-2-enrichment-data-import-with-validation: backlog
-  4-3-staleness-indicators-warnings: backlog
-  epic-4-retrospective: optional
-
-  epic-5: backlog
-  5-1-filtered-result-export-csv-json-with-metadata: backlog
-  5-2-full-dataset-export-with-streaming: backlog
-  5-3-export-integrity-verification: backlog
-  epic-5-retrospective: optional
+    epic-0: done
+    0-1-project-scaffolding-with-tauri-react: done
+    0-2-comprehensive-test-infrastructure: done
+    0-3-tailwind-css-design-system-foundation: done
+    epic-0-retrospective: optional
+    epic-1: in-progress
+    1-1-file-selection-with-native-os-picker: done
+    1-2-multi-format-log-parser-rfc3164-rfc5424-csv: done
+    1-3-hybrid-index-creation-inverted-bitmap: done
+    1-4-index-persistence-reuse-with-sha256: done # Code Review #2 complete - all issues fixed
+    1-5-log-entry-display-table-with-virtual-scrolling: done
+    1-6-entry-detail-view-with-copy-functionality: done # Code Review complete - 9 issues fixed, integration tests remain
+    epic-1-retrospective: optional
+    epic-2: backlog
+    2-1-visual-filter-builder-ui: backlog
+    2-2-query-execution-engine-with-boolean-logic: backlog
+    2-3-filter-management-save-load-delete: backlog
+    2-4-search-history-with-persistence: backlog
+    epic-2-retrospective: optional
+    epic-3: backlog
+    3-1-api-connection-setup-with-credential-storage: backlog
+    3-2-interface-name-mapping-physical-to-logical: backlog
+    3-3-rule-label-enrichment-hash-to-description: backlog
+    3-4-alias-resolution-ip-groups: backlog
+    3-5-graceful-degradation-offline-mode: backlog
+    epic-3-retrospective: optional
+    epic-4: backlog
+    4-1-enrichment-data-export-to-json: backlog
+    4-2-enrichment-data-import-with-validation: backlog
+    4-3-staleness-indicators-warnings: backlog
+    epic-4-retrospective: optional
+    epic-5: backlog
+    5-1-filtered-result-export-csv-json-with-metadata: backlog
+    5-2-full-dataset-export-with-streaming: backlog
+    5-3-export-integrity-verification: backlog
+    epic-5-retrospective: optional
