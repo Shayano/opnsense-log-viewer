@@ -1,0 +1,11 @@
+--- a/src/components/filter-builder/value-input.tsx
++++ b/src/components/filter-builder/value-input.tsx
+@@ -191,7 +191,7 @@ export function ValueInput({ fieldType, operatorType, value, onChange, error }:
+         <input
+           type="number"
+           value={value as number || ''}
+-          onChange={(e) => onChange(e.target.value)}
++          onChange={(e) => onChange(Number(e.target.value))}
+           placeholder="e.g., 443"
+           min="0"
+           max="65535"
