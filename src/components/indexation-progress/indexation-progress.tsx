@@ -58,7 +58,7 @@ export function IndexationProgress({ isIndexing, onComplete, onError }: Indexati
   const handleCancel = async () => {
     try {
       await invoke('cancel_indexation');
-      toast.info('Indexation cancelled');
+      toast.success('Indexation cancelled');
     } catch (error) {
       toast.error(`Failed to cancel: ${error}`);
     }
@@ -81,7 +81,7 @@ export function IndexationProgress({ isIndexing, onComplete, onError }: Indexati
       <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
         <h2 className="text-lg font-semibold mb-4">Indexing Log File</h2>
 
-        <ProgressBar value={progress.percentage} max={100} />
+        <ProgressBar value={progress.percentage} />
 
         <div className="mt-4 space-y-2 text-sm text-gray-600 dark:text-gray-400">
           <div className="flex justify-between">

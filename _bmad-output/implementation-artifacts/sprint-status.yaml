@@ -51,7 +51,7 @@ development_status:
   1-2-multi-format-log-parser-rfc3164-rfc5424-csv: done
   1-3-hybrid-index-creation-inverted-bitmap: done
   1-4-index-persistence-reuse-with-sha256: in-progress  # Frontend complete, backend pending
-  1-5-log-entry-display-table-with-virtual-scrolling: backlog
+  1-5-log-entry-display-table-with-virtual-scrolling: done
   1-6-entry-detail-view-with-copy-functionality: backlog
   epic-1-retrospective: optional
 
