@@ -119,3 +119,47 @@ pub struct RuleLabelResponse {
     pub description: Option<String>,
     pub enabled: Option<String>, // "1" or "0"
 }
+
+// ============================================================================
+// Alias Resolution Types (Story 3.4)
+// ============================================================================
+
+/// Single alias mapping for an IP
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AliasMapping {
+    pub alias_name: String,
+    pub group_members: Vec<String>,  // IPs in this alias group
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub alias_type: Option<String>,  // network, host, port, url, etc.
+}
+
+/// Cached alias mappings with metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AliasCache {
+    pub mappings: HashMap<String, Vec<AliasMapping>>, // IP → [Alias1, Alias2]
+    pub last_updated: DateTime<Utc>,
+    pub device_id: String, // OPNsense endpoint URL
+}
+
+/// OPNsense API response format for /api/firewall/alias/searchItem
+/// Response includes rows array with alias objects
+#[derive(Debug, Deserialize)]
+pub struct AliasSearchResponse {
+    pub rows: Vec<AliasRow>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AliasRow {
+    #[serde(rename = "uuid")]
+    pub alias_uuid: Option<String>,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub alias_type: Option<String>,
+    pub content: String,  // Comma-separated IPs or values
+    #[serde(rename = "descr")]
+    pub description: Option<String>,
+}

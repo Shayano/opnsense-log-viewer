@@ -3,14 +3,16 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 
-use crate::api_client::types::{InterfaceMappingCache, RuleLabelCache};
+use crate::api_client::types::{AliasCache, AliasMapping, InterfaceMappingCache, RuleLabelCache};
 
-/// Thread-safe in-memory cache for interface mappings and rule labels
+/// Thread-safe in-memory cache for interface mappings, rule labels, and IP aliases
 #[derive(Clone)]
 pub struct EnrichmentCacheState {
     interface_cache: Arc<Mutex<Option<InterfaceMappingCache>>>,
     rule_label_cache: Arc<Mutex<HashMap<String, String>>>,
     rule_label_metadata: Arc<Mutex<Option<DateTime<Utc>>>>,
+    alias_cache: Arc<Mutex<HashMap<String, Vec<AliasMapping>>>>,
+    alias_metadata: Arc<Mutex<Option<DateTime<Utc>>>>,
     device_id: Arc<Mutex<Option<String>>>,
 }
 
@@ -20,6 +22,8 @@ impl EnrichmentCacheState {
             interface_cache: Arc::new(Mutex::new(None)),
             rule_label_cache: Arc::new(Mutex::new(HashMap::new())),
             rule_label_metadata: Arc::new(Mutex::new(None)),
+            alias_cache: Arc::new(Mutex::new(HashMap::new())),
+            alias_metadata: Arc::new(Mutex::new(None)),
             device_id: Arc::new(Mutex::new(None)),
         }
     }
@@ -39,7 +43,7 @@ impl EnrichmentCacheState {
         let mut cache_guard = self.interface_cache.lock().unwrap();
         *cache_guard = Some(cache);
 
-        log::debug!("Interface mappings cached");
+        tracing::debug!("Interface mappings cached");
     }
 
     /// Get logical name for a physical interface
@@ -62,7 +66,7 @@ impl EnrichmentCacheState {
         let mut cache_guard = self.interface_cache.lock().unwrap();
         *cache_guard = None;
 
-        log::debug!("Interface mappings cache cleared");
+        tracing::debug!("Interface mappings cache cleared");
     }
 
     // ============================================================================
@@ -91,7 +95,7 @@ impl EnrichmentCacheState {
         let mut device = self.device_id.lock().unwrap();
         *device = Some(device_id);
 
-        log::debug!("Rule labels cached: {} entries", cache.len());
+        tracing::debug!("Rule labels cached: {} entries", cache.len());
     }
 
     /// Get rule label for a specific hash
@@ -125,7 +129,70 @@ impl EnrichmentCacheState {
         let mut metadata = self.rule_label_metadata.lock().unwrap();
         *metadata = None;
 
-        log::debug!("Rule label cache cleared");
+        tracing::debug!("Rule label cache cleared");
+    }
+
+    // ============================================================================
+    // Alias Cache Methods (Story 3.4)
+    // ============================================================================
+
+    /// Store alias mapping for single IP
+    pub fn set_alias(&self, ip: String, aliases: Vec<AliasMapping>) {
+        let mut cache = self.alias_cache.lock().unwrap();
+        cache.insert(ip, aliases);
+
+        // Update metadata timestamp
+        let mut metadata = self.alias_metadata.lock().unwrap();
+        *metadata = Some(Utc::now());
+    }
+
+    /// Store multiple alias mappings (batch)
+    pub fn set_aliases(&self, alias_map: HashMap<String, Vec<AliasMapping>>, device_id: String) {
+        let mut cache = self.alias_cache.lock().unwrap();
+        cache.extend(alias_map);
+
+        // Update metadata
+        let mut metadata = self.alias_metadata.lock().unwrap();
+        *metadata = Some(Utc::now());
+
+        let mut device = self.device_id.lock().unwrap();
+        *device = Some(device_id);
+
+        tracing::debug!("Aliases cached: {} IPs", cache.len());
+    }
+
+    /// Get aliases for a specific IP
+    pub fn get_alias(&self, ip: &str) -> Option<Vec<AliasMapping>> {
+        let cache = self.alias_cache.lock().unwrap();
+        cache.get(ip).cloned()
+    }
+
+    /// Get all aliases with metadata
+    pub fn get_all_aliases(&self) -> Option<AliasCache> {
+        let cache = self.alias_cache.lock().unwrap();
+        let metadata = self.alias_metadata.lock().unwrap();
+        let device_id = self.device_id.lock().unwrap();
+
+        if cache.is_empty() {
+            return None;
+        }
+
+        Some(AliasCache {
+            mappings: cache.clone(),
+            last_updated: metadata.unwrap_or(Utc::now()),
+            device_id: device_id.clone().unwrap_or_default(),
+        })
+    }
+
+    /// Clear alias cache (e.g., when switching devices)
+    pub fn clear_aliases(&self) {
+        let mut cache = self.alias_cache.lock().unwrap();
+        cache.clear();
+
+        let mut metadata = self.alias_metadata.lock().unwrap();
+        *metadata = None;
+
+        tracing::debug!("Alias cache cleared");
     }
 }
 

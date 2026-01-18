@@ -6,10 +6,11 @@ interface InterfaceMappingCache {
   deviceId: string;
 }
 
-interface RuleLabelCache {
-  mappings: Record<string, string>; // hash → description
-  lastUpdated: string;
-  deviceId: string;
+interface AliasMapping {
+  aliasName: string;
+  groupMembers: string[];
+  description?: string;
+  aliasType?: string;
 }
 
 interface EnrichmentStore {
@@ -32,6 +33,16 @@ interface EnrichmentStore {
   getRuleLabel: (hash: string) => string | null;
   addRuleLabel: (hash: string, description: string) => void;
   clearRuleLabels: () => void;
+
+  // Aliases (Story 3.4)
+  aliases: Map<string, AliasMapping[]>; // IP → aliases
+  aliasesLastUpdated: Date | null;
+
+  // Alias actions
+  setAliases: (aliases: Record<string, AliasMapping[]>) => void;
+  getAliasesForIP: (ip: string) => AliasMapping[] | null;
+  addAlias: (ip: string, aliases: AliasMapping[]) => void;
+  clearAliases: () => void;
 }
 
 export const useEnrichmentStore = create<EnrichmentStore>((set, get) => ({
@@ -104,6 +115,48 @@ export const useEnrichmentStore = create<EnrichmentStore>((set, get) => ({
     set({
       ruleLabels: new Map(),
       ruleLabelsLastUpdated: null,
+    });
+  },
+
+  // ============================================================================
+  // Aliases (Story 3.4)
+  // ============================================================================
+
+  // Initial alias state
+  aliases: new Map(),
+  aliasesLastUpdated: null,
+
+  // Set aliases from cache or API response
+  setAliases: (aliases) => {
+    const aliasesMap = new Map(Object.entries(aliases));
+    set({
+      aliases: aliasesMap,
+      aliasesLastUpdated: new Date(),
+    });
+  },
+
+  // Get aliases for a specific IP
+  getAliasesForIP: (ip) => {
+    const { aliases } = get();
+    return aliases.get(ip) || null;
+  },
+
+  // Add alias for single IP
+  addAlias: (ip, aliasData) => {
+    const { aliases } = get();
+    const updatedAliases = new Map(aliases);
+    updatedAliases.set(ip, aliasData);
+    set({
+      aliases: updatedAliases,
+      aliasesLastUpdated: new Date(),
+    });
+  },
+
+  // Clear all aliases
+  clearAliases: () => {
+    set({
+      aliases: new Map(),
+      aliasesLastUpdated: null,
     });
   },
 }));

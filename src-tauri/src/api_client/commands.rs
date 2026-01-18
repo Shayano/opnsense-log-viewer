@@ -1,10 +1,10 @@
 use tauri::{command, AppHandle, Emitter, State};
-use crate::api_client::types::{ApiCredentials, ConnectionTestResult, InterfaceMappingCache};
+use crate::api_client::types::{AliasMapping, ApiCredentials, ConnectionTestResult, InterfaceMappingCache};
 use crate::api_client::client::test_connection;
-use crate::api_client::enrichment::{fetch_interface_mappings, fetch_rule_labels_batch};
+use crate::api_client::enrichment::{fetch_aliases_batch, fetch_interface_mappings, fetch_rule_labels_batch};
 use crate::credentials::{manager, encrypted_storage};
 use crate::state::EnrichmentCacheState;
-use log::{info, warn};
+use tracing::{info, warn};
 use std::collections::HashMap;
 
 /// Save API credentials to OS keychain (with encrypted fallback)
@@ -232,4 +232,52 @@ pub fn get_rule_label(
     hash: String,
 ) -> Option<String> {
     cache_state.get_rule_label(&hash)
+}
+
+// ============================================================================
+// Alias Resolution Commands (Story 3.4)
+// ============================================================================
+
+/// Fetch aliases from OPNsense API for given IPs
+#[command]
+pub async fn fetch_aliases(
+    cache_state: State<'_, EnrichmentCacheState>,
+    ips: Vec<String>,
+) -> Result<HashMap<String, Vec<AliasMapping>>, String> {
+    // Load credentials
+    let credentials = manager::load_credentials()
+        .ok()
+        .flatten()
+        .or_else(|| encrypted_storage::decrypt_and_load().ok().flatten())
+        .ok_or("No API credentials saved. Please configure OPNsense API connection first.")?;
+
+    // Fetch from API (batch with parallelization)
+    let alias_map = fetch_aliases_batch(&credentials, ips)
+        .await
+        .map_err(|e| format!("Failed to fetch aliases: {}", e))?;
+
+    // Store in cache
+    cache_state.set_aliases(alias_map.clone(), credentials.endpoint_url.clone());
+
+    info!("Aliases fetched and cached: {} IPs", alias_map.len());
+    Ok(alias_map)
+}
+
+/// Get cached aliases
+#[command]
+pub fn get_aliases(
+    cache_state: State<'_, EnrichmentCacheState>,
+) -> HashMap<String, Vec<AliasMapping>> {
+    cache_state.get_all_aliases()
+        .map(|cache| cache.mappings)
+        .unwrap_or_default()
+}
+
+/// Get aliases for specific IP
+#[command]
+pub fn get_alias(
+    cache_state: State<'_, EnrichmentCacheState>,
+    ip: String,
+) -> Option<Vec<AliasMapping>> {
+    cache_state.get_alias(&ip)
 }

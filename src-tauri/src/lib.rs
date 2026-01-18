@@ -49,7 +49,11 @@ pub fn run() {
             // Story 3.3: Rule Label Enrichment
             api_client::commands::fetch_rule_labels,
             api_client::commands::get_rule_labels,
-            api_client::commands::get_rule_label
+            api_client::commands::get_rule_label,
+            // Story 3.4: Alias Resolution
+            api_client::commands::fetch_aliases,
+            api_client::commands::get_aliases,
+            api_client::commands::get_alias
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

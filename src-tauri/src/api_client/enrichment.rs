@@ -1,9 +1,14 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use tokio::task::JoinSet;
+use tokio::sync::Semaphore;
+use std::sync::Arc;
 
 use crate::api_client::client::build_api_client;
-use crate::api_client::types::{ApiCredentials, ApiError, InterfaceMappingResponse, RuleLabelResponse};
+use crate::api_client::types::{
+    AliasMapping, AliasSearchResponse, ApiCredentials, ApiError,
+    InterfaceMappingResponse, RuleLabelResponse
+};
 
 /// Fetch interface name mappings from OPNsense API
 ///
@@ -103,7 +108,8 @@ async fn fetch_rule_label(
         .post(&url)
         .header("X-API-Key", &credentials.api_key)
         .header("X-API-Secret", &credentials.api_secret)
-        .json(&request_body)
+        .header("Content-Type", "application/json")
+        .body(serde_json::to_string(&request_body)?)
         .send()
         .await
         .context("Failed to fetch rule label")?;
@@ -158,7 +164,13 @@ pub async fn fetch_rule_labels_batch(
 
         tasks.spawn(async move {
             // Acquire semaphore permit before making request
-            let _permit = sem.acquire().await.expect("Semaphore closed");
+            let _permit = match sem.acquire().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    tracing::error!("Semaphore acquisition failed for hash: {}", hash_clone);
+                    return (hash_clone, Err(anyhow::anyhow!("Semaphore acquisition failed")));
+                }
+            };
             let result = fetch_rule_label(&credentials_clone, &hash_clone).await;
             (hash_clone, result)
         });
@@ -207,4 +219,133 @@ mod tests {
     }
 
     // Additional tests with mock HTTP client will be added in integration tests
+}
+
+// ============================================================================
+// Alias Resolution (Story 3.4)
+// ============================================================================
+
+/// Fetch aliases for a single IP address from OPNsense API
+///
+/// Calls POST /api/firewall/alias/searchItem
+/// Request body: { "item": "<ip_address>" }
+///
+/// Returns Vec<AliasMapping> (may be empty if IP not aliased)
+async fn fetch_aliases_for_ip(
+    credentials: &ApiCredentials,
+    ip: &str,
+) -> Result<Vec<AliasMapping>> {
+    let client = build_api_client(credentials)?;
+
+    let url = format!("{}/api/firewall/alias/searchItem", credentials.endpoint_url);
+
+    log::debug!("Fetching aliases for IP: {}", ip);
+
+    let request_body = serde_json::json!({
+        "item": ip
+    });
+
+    let response = client
+        .post(&url)
+        .header("X-API-Key", &credentials.api_key)
+        .header("X-API-Secret", &credentials.api_secret)
+        .header("Content-Type", "application/json")
+        .body(serde_json::to_string(&request_body)?)
+        .send()
+        .await
+        .context("Failed to fetch aliases")?;
+
+    if !response.status().is_success() {
+        if response.status() == 401 {
+            return Err(ApiError::AuthError.into());
+        }
+        return Err(ApiError::NetworkError(format!("HTTP {}", response.status())).into());
+    }
+
+    // Parse response
+    let response_data: AliasSearchResponse = response.json().await
+        .context("Failed to parse alias response")?;
+
+    // Convert rows to AliasMapping
+    let aliases: Vec<AliasMapping> = response_data.rows.into_iter().map(|row| {
+        let group_members: Vec<String> = row.content
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        AliasMapping {
+            alias_name: row.name,
+            group_members,
+            description: row.description,
+            alias_type: row.alias_type,
+        }
+    }).collect();
+
+    Ok(aliases)
+}
+
+/// Fetch aliases for multiple IPs in parallel (batch optimization)
+///
+/// Calls fetch_aliases_for_ip() for each IP concurrently (up to 10 parallel)
+/// Returns HashMap: IP → Vec<AliasMapping> (only includes aliased IPs)
+pub async fn fetch_aliases_batch(
+    credentials: &ApiCredentials,
+    ips: Vec<String>,
+) -> Result<HashMap<String, Vec<AliasMapping>>> {
+    tracing::info!("Fetching aliases for {} IPs in batch", ips.len());
+
+    const MAX_CONCURRENT_REQUESTS: usize = 10;
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS));
+
+    let mut tasks = JoinSet::new();
+    let credentials = credentials.clone();
+
+    // Spawn parallel tasks with semaphore limiting
+    for ip in ips {
+        let credentials_clone = credentials.clone();
+        let ip_clone = ip.clone();
+        let semaphore_clone = Arc::clone(&semaphore);
+
+        tasks.spawn(async move {
+            let _permit = match semaphore_clone.acquire().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    tracing::error!("Semaphore acquisition failed for IP: {}", ip_clone);
+                    return (ip_clone, Err(anyhow::anyhow!("Semaphore acquisition failed")));
+                }
+            };
+            let result = fetch_aliases_for_ip(&credentials_clone, &ip_clone).await;
+            (ip_clone, result)
+        });
+    }
+
+    // Collect results
+    let mut alias_map = HashMap::new();
+    let mut success_count = 0;
+    let mut error_count = 0;
+
+    while let Some(result) = tasks.join_next().await {
+        match result {
+            Ok((ip, Ok(aliases))) if !aliases.is_empty() => {
+                alias_map.insert(ip, aliases);
+                success_count += 1;
+            }
+            Ok((ip, Ok(_))) => {
+                // IP not aliased (empty response)
+                tracing::debug!("No aliases found for IP: {}", ip);
+            }
+            Ok((ip, Err(e))) => {
+                tracing::warn!("Failed to fetch aliases for {}: {}", ip, e);
+                error_count += 1;
+            }
+            Err(e) => {
+                tracing::error!("Task join error: {}", e);
+                error_count += 1;
+            }
+        }
+    }
+
+    tracing::info!("Alias fetch complete: {} aliased, {} errors", success_count, error_count);
+    Ok(alias_map)
 }
