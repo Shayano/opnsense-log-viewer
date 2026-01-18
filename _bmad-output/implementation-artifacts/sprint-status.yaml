@@ -89,8 +89,8 @@ development_status:
     2-3-filter-management-save-load-delete: done # Code Review complete - 13 issues found, 8 fixed, 5 remaining (no component tests, no migration, manual session test needed)
     2-4-search-history-with-persistence: done
     epic-2-retrospective: optional
-    epic-3: backlog
-    3-1-api-connection-setup-with-credential-storage: backlog
+    epic-3: in-progress
+    3-1-api-connection-setup-with-credential-storage: in-progress
     3-2-interface-name-mapping-physical-to-logical: backlog
     3-3-rule-label-enrichment-hash-to-description: backlog
     3-4-alias-resolution-ip-groups: backlog

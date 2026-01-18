@@ -4,6 +4,7 @@ import { ErrorBoundary } from './components/error-boundary';
 import { ComponentShowcase } from './pages/component-showcase';
 import { FileSelector, FileError } from './components/file-selector';
 import { FilterSidebar } from './components/filter-sidebar';
+import { SettingsDialog } from './components/settings-dialog';
 
 function App() {
   return (
@@ -12,7 +13,10 @@ function App() {
       <header className="border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex-shrink-0">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-semibold">OPNsense Log Viewer</h1>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <SettingsDialog />
+            <ThemeToggle />
+          </div>
         </div>
       </header>
 

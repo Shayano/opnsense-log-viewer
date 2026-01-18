@@ -5,6 +5,8 @@ pub mod types;
 pub mod indexer;
 pub mod storage;
 pub mod query;
+mod api_client; // Story 3.1: API client and connection setup
+mod credentials; // Story 3.1: Credential storage
 
 // Re-export types for use in other modules
 pub use types::{FileMetadata, IndexMetadata};
@@ -30,7 +32,11 @@ pub fn run() {
             commands::storage::list_all_indexes,
             commands::storage::delete_index_by_hash,
             commands::storage::load_index_file,
-            commands::query::execute_query
+            commands::query::execute_query,
+            // Story 3.1: API Connection & Credential Storage
+            api_client::commands::save_api_credentials,
+            api_client::commands::load_api_credentials,
+            api_client::commands::test_api_connection
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
