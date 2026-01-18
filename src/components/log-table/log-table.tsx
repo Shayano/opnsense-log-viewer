@@ -181,9 +181,10 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
   useEffect(() => {
     if (entries.length > 0) {
       // Debounce enrichment to avoid excessive API calls
+      const DEBOUNCE_ENRICHMENT_MS = 500;
       const timeoutId = setTimeout(() => {
         enrichRuleLabels(entries);
-      }, 500);
+      }, DEBOUNCE_ENRICHMENT_MS);
 
       return () => clearTimeout(timeoutId);
     }

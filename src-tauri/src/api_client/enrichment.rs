@@ -26,7 +26,7 @@ pub async fn fetch_interface_mappings(
         credentials.endpoint_url
     );
 
-    log::debug!("Fetching interface mappings from OPNsense API");
+    tracing::debug!("Fetching interface mappings from OPNsense API");
 
     let response = client
         .get(&url)
@@ -58,7 +58,7 @@ pub async fn fetch_interface_mappings(
         })
         .collect();
 
-    log::info!("Fetched {} interface mappings", normalized_mappings.len());
+    tracing::info!("Fetched {} interface mappings", normalized_mappings.len());
     Ok(normalized_mappings)
 }
 
@@ -91,7 +91,7 @@ async fn fetch_rule_label(
 
     let url = format!("{}/api/firewall/filter/searchRule", credentials.endpoint_url);
 
-    log::debug!("Fetching rule label for hash: {}", rule_hash);
+    tracing::debug!("Fetching rule label for hash: {}", rule_hash);
 
     let request_body = serde_json::json!({
         "current": 1,
@@ -103,8 +103,7 @@ async fn fetch_rule_label(
         .post(&url)
         .header("X-API-Key", &credentials.api_key)
         .header("X-API-Secret", &credentials.api_secret)
-        .header("Content-Type", "application/json")
-        .body(request_body.to_string())
+        .json(&request_body)
         .send()
         .await
         .context("Failed to fetch rule label")?;
@@ -142,17 +141,24 @@ pub async fn fetch_rule_labels_batch(
     credentials: &ApiCredentials,
     rule_hashes: Vec<String>,
 ) -> Result<HashMap<String, String>> {
-    log::info!("Fetching {} rule labels in batch", rule_hashes.len());
+    tracing::info!("Fetching {} rule labels in batch", rule_hashes.len());
+
+    // Limit concurrent requests to 10 to avoid overwhelming OPNsense API
+    const MAX_CONCURRENT_REQUESTS: usize = 10;
 
     let mut tasks = JoinSet::new();
     let credentials = credentials.clone();
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_REQUESTS));
 
-    // Spawn parallel tasks (tokio manages concurrency)
+    // Spawn parallel tasks with semaphore limiting concurrency
     for hash in rule_hashes {
         let credentials_clone = credentials.clone();
         let hash_clone = hash.clone();
+        let sem = semaphore.clone();
 
         tasks.spawn(async move {
+            // Acquire semaphore permit before making request
+            let _permit = sem.acquire().await.expect("Semaphore closed");
             let result = fetch_rule_label(&credentials_clone, &hash_clone).await;
             (hash_clone, result)
         });
@@ -170,20 +176,20 @@ pub async fn fetch_rule_labels_batch(
                 success_count += 1;
             }
             Ok((hash, Ok(None))) => {
-                log::debug!("Rule label not found for hash: {}", hash);
+                tracing::debug!("Rule label not found for hash: {}", hash);
             }
             Ok((hash, Err(e))) => {
-                log::warn!("Failed to fetch rule label for {}: {}", hash, e);
+                tracing::warn!("Failed to fetch rule label for {}: {}", hash, e);
                 error_count += 1;
             }
             Err(e) => {
-                log::error!("Task join error: {}", e);
+                tracing::error!("Task join error: {}", e);
                 error_count += 1;
             }
         }
     }
 
-    log::info!("Rule label fetch complete: {} found, {} errors", success_count, error_count);
+    tracing::info!("Rule label fetch complete: {} found, {} errors", success_count, error_count);
     Ok(labels)
 }
 

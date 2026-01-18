@@ -19,9 +19,10 @@ export function extractUniqueRuleHashes(entries: LogEntry[]): Set<string> {
   const hashes = new Set<string>();
 
   for (const entry of entries) {
-    // ruleLabel field contains the hash
-    if (entry.ruleLabel && entry.ruleLabel.trim() !== '') {
-      hashes.add(entry.ruleLabel);
+    // Try both field naming conventions for rule hash
+    const ruleHash = entry.ruleLabel || (entry as any).rule_hash || (entry as any).ruleHash;
+    if (ruleHash && typeof ruleHash === 'string' && ruleHash.trim() !== '') {
+      hashes.add(ruleHash);
     }
   }
 

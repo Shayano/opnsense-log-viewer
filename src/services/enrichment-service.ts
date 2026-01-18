@@ -50,7 +50,18 @@ export async function enrichRuleLabels(entries: LogEntry[]): Promise<void> {
     }
   } catch (error) {
     console.error('Failed to enrich rule labels:', error);
-    toast.error('Rule enrichment failed. Using cached labels.');
+
+    // Provide specific error guidance based on error type
+    const errorMessage = (error as Error).toString();
+    if (errorMessage.includes('No API credentials')) {
+      toast.error('Rule enrichment failed: No API credentials configured. Configure OPNsense connection in Settings.');
+    } else if (errorMessage.includes('Authentication failed') || errorMessage.includes('401')) {
+      toast.error('Rule enrichment failed: Invalid API credentials. Check your API key and secret in Settings.');
+    } else if (errorMessage.includes('Network') || errorMessage.includes('timeout')) {
+      toast.error('Rule enrichment failed: Cannot reach OPNsense API. Check network connection and firewall settings.');
+    } else {
+      toast.error(`Rule enrichment failed: ${errorMessage}. Using cached labels.`);
+    }
   }
 }
 

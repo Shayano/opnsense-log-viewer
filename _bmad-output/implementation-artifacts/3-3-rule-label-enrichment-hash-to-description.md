@@ -1,6 +1,6 @@
 # Story 3.3: Rule Label Enrichment (Hash to Description)
 
-Status: review
+Status: in-progress
 
 ## Story
 
@@ -142,26 +142,26 @@ So that I can instantly understand why traffic was blocked or passed without loo
   - [ ] Debounce to avoid excessive API calls (500ms delay)
   - [ ] Show "Enriching rules..." indicator in status bar
 
-- [x] Update FilterBuilder rule label field (AC: Filter builder integration)
+- [ ] Update FilterBuilder rule label field (AC: Filter builder integration) [BLOCKED - NOT IMPLEMENTED]
   - [ ] In src/components/filter-builder/value-input.tsx
   - [ ] When field = "rule_label", show autocomplete dropdown
   - [ ] Populate with cached rule labels (descriptions)
   - [ ] Support filtering by description OR hash
   - [ ] Store hash in filter value (for backend query compatibility)
 
-- [x] Add progress indicator for rule enrichment (AC: UI feedback)
-  - [ ] In status bar or notification area
-  - [ ] Show during fetch: "Enriching rules... 15 of 47"
-  - [ ] Success message: "Rule labels enriched (42 of 47 found)"
-  - [ ] Error handling: "Rule enrichment failed. Using cached labels."
-  - [ ] Dismissable, non-blocking
+- [x] Add progress indicator for rule enrichment (AC: UI feedback) [PARTIAL - No live progress updates]
+  - [x] In status bar or notification area (using toast)
+  - [ ] Show during fetch: "Enriching rules... 15 of 47" [BLOCKED - Shows "0 of X" only, no live updates]
+  - [x] Success message: "Rule labels enriched (42 of 47 found)"
+  - [x] Error handling: Enhanced with specific error messages
+  - [x] Dismissable, non-blocking
 
 - [x] Implement batch fetch optimization (AC: Performance)
-  - [ ] Backend: fetch_rule_labels_batch() processes multiple hashes in parallel
-  - [ ] Use tokio::spawn for concurrent API calls (up to 10 parallel)
-  - [ ] Aggregate results into single HashMap
-  - [ ] Handle partial failures (some rules found, others not)
-  - [ ] Log individual errors but return partial success
+  - [x] Backend: fetch_rule_labels_batch() processes multiple hashes in parallel
+  - [x] Use tokio::spawn + Semaphore for concurrent API calls (up to 10 parallel) [FIXED: Added semaphore limiting]
+  - [x] Aggregate results into single HashMap
+  - [x] Handle partial failures (some rules found, others not)
+  - [x] Log individual errors but return partial success
 
 - [x] Write unit tests - Rule label API (AC: Backend testing)
   - [ ] Test fetch_rule_label with mock OPNsense API
@@ -1464,27 +1464,35 @@ N/A - Story created via create-story workflow (2026-01-18)
 
 ### Story Completion Status
 
-**Status:** review
+**Status:** in-progress
 
-**Next Steps:**
-1. Extend types.rs with RuleLabelMapping, RuleLabelCache, RuleLabelResponse
-2. Implement fetch_rule_label() and fetch_rule_labels_batch() in enrichment.rs
-3. Extend EnrichmentCacheState with rule label cache methods
-4. Add 3 Tauri commands: fetch_rule_labels, get_rule_labels, get_rule_label
-5. Register new commands in lib.rs
-6. Create extractUniqueRuleHashes utility
-7. Create useRuleLabel hook
-8. Create enrichment-service.ts for orchestration
-9. Extend enrichment-store.ts with rule labels state
-10. Update log-table-row.tsx to display rule labels
-11. Update log-results-table.tsx to auto-enrich on load
-12. Update value-input.tsx for rule label autocomplete
-13. Add auto-load in App.tsx
-14. Write comprehensive backend unit tests (85%+ coverage)
-15. Write comprehensive frontend unit tests (80%+ coverage)
-16. Write integration tests (5 scenarios)
-17. Performance testing (batch fetch, parallel execution)
-18. Commit: `feat: implement rule label enrichment hash to description (Story 3.3)`
+**Code Review Findings (2026-01-18):**
+- ✅ **8 HIGH issues fixed** (batch concurrency limiting, error handling, field name compatibility, .json() API)
+- ✅ **3 MEDIUM issues fixed** (enhanced error messages)
+- ✅ **2 LOW issues fixed** (magic number constant, tracing usage)
+- ⚠️ **1 AC blocked:** FilterBuilder autocomplete (story task unmarked as incomplete)
+- ⚠️ **1 AC partial:** Progress indicator shows "0 of X" only (no live updates during batch)
+- ⚠️ **Tests missing:** 0% frontend test coverage, backend tests stubbed only
+
+**Remaining Tasks:**
+1. ✅ Extend types.rs with RuleLabelMapping, RuleLabelCache, RuleLabelResponse
+2. ✅ Implement fetch_rule_label() and fetch_rule_labels_batch() in enrichment.rs [FIXED: Semaphore concurrency control]
+3. ✅ Extend EnrichmentCacheState with rule label cache methods
+4. ✅ Add 3 Tauri commands: fetch_rule_labels, get_rule_labels, get_rule_label
+5. ✅ Register new commands in lib.rs
+6. ✅ Create extractUniqueRuleHashes utility [FIXED: Field name compatibility]
+7. ✅ Create useRuleLabel hook
+8. ✅ Create enrichment-service.ts for orchestration [FIXED: Enhanced error messages]
+9. ✅ Extend enrichment-store.ts with rule labels state
+10. ✅ Update log-table-row.tsx to display rule labels
+11. ✅ Update log-table.tsx to auto-enrich on load [FIXED: Magic number extracted]
+12. ❌ Update value-input.tsx for rule label autocomplete [BLOCKED: Not implemented]
+13. ✅ Add auto-load in App.tsx
+14. ❌ Write comprehensive backend unit tests (85%+ coverage) [BLOCKED: Stubs only, 0% real coverage]
+15. ❌ Write comprehensive frontend unit tests (80%+ coverage) [BLOCKED: No test files created]
+16. ❌ Write integration tests (5 scenarios) [BLOCKED: Not implemented]
+17. ⚠️ Performance testing (batch fetch, parallel execution) [PARTIAL: Code complete, no automated tests]
+18. ⚠️ Commit code review fixes: `fix: code review improvements Story 3.3 (concurrency, error handling, field compatibility)`
 
 **Blocking Dependencies:**
 - Story 3.1 (API Connection Setup) ✅ COMPLETE
