@@ -32,7 +32,9 @@ export function FormatSelector({ isOpen, onConfirm, onCancel }: FormatSelectorPr
               className="mt-1"
             />
             <div>
-              <div className="font-medium text-gray-900 dark:text-gray-100">RFC3164 (Legacy Syslog)</div>
+              <div className="font-medium text-gray-900 dark:text-gray-100">
+                RFC3164 (Legacy Syslog)
+              </div>
               <div className="text-sm text-gray-500 dark:text-gray-400 font-mono">
                 &lt;134&gt;Jan 15 14:30:00 firewall filterlog[123]: message
               </div>
@@ -49,7 +51,9 @@ export function FormatSelector({ isOpen, onConfirm, onCancel }: FormatSelectorPr
               className="mt-1"
             />
             <div>
-              <div className="font-medium text-gray-900 dark:text-gray-100">RFC5424 (Modern Syslog)</div>
+              <div className="font-medium text-gray-900 dark:text-gray-100">
+                RFC5424 (Modern Syslog)
+              </div>
               <div className="text-sm text-gray-500 dark:text-gray-400 font-mono">
                 &lt;134&gt;1 2026-01-15T14:30:00Z firewall filterlog 123 - - message
               </div>
@@ -66,7 +70,9 @@ export function FormatSelector({ isOpen, onConfirm, onCancel }: FormatSelectorPr
               className="mt-1"
             />
             <div>
-              <div className="font-medium text-gray-900 dark:text-gray-100">CSV filterlog (OPNsense)</div>
+              <div className="font-medium text-gray-900 dark:text-gray-100">
+                CSV filterlog (OPNsense)
+              </div>
               <div className="text-sm text-gray-500 dark:text-gray-400 font-mono">
                 1705329000,,,vtnet0,,pass,inet,192.168.1.100,443,...
               </div>

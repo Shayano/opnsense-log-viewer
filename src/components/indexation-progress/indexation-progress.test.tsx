@@ -22,23 +22,13 @@ vi.mock('react-hot-toast', () => ({
 describe('IndexationProgress', () => {
   it('should not render when not indexing', () => {
     const { container } = render(
-      <IndexationProgress
-        isIndexing={false}
-        onComplete={() => {}}
-        onError={() => {}}
-      />
+      <IndexationProgress isIndexing={false} onComplete={() => {}} onError={() => {}} />
     );
     expect(container.firstChild).toBeNull();
   });
 
   it('should render progress UI when indexing', () => {
-    render(
-      <IndexationProgress
-        isIndexing={true}
-        onComplete={() => {}}
-        onError={() => {}}
-      />
-    );
+    render(<IndexationProgress isIndexing={true} onComplete={() => {}} onError={() => {}} />);
 
     expect(screen.getByText('Indexing Log File')).toBeInTheDocument();
     expect(screen.getByText('Progress:')).toBeInTheDocument();

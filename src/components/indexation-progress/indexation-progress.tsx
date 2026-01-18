@@ -19,11 +19,7 @@ interface IndexationProgressProps {
   onError: (error: string) => void;
 }
 
-export function IndexationProgress({
-  isIndexing,
-  onComplete,
-  onError,
-}: IndexationProgressProps) {
+export function IndexationProgress({ isIndexing, onComplete, onError }: IndexationProgressProps) {
   const [progress, setProgress] = useState<IndexProgress>({
     percentage: 0,
     bytesProcessed: 0,
@@ -53,9 +49,9 @@ export function IndexationProgress({
     });
 
     return () => {
-      progressUnlisten.then(fn => fn());
-      completeUnlisten.then(fn => fn());
-      errorUnlisten.then(fn => fn());
+      progressUnlisten.then((fn) => fn());
+      completeUnlisten.then((fn) => fn());
+      errorUnlisten.then((fn) => fn());
     };
   }, [isIndexing, onComplete, onError]);
 
@@ -69,7 +65,7 @@ export function IndexationProgress({
   };
 
   const formatBytes = (bytes: number): string => {
-    return `${(bytes / (1024 ** 3)).toFixed(2)} GB`;
+    return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
   };
 
   const formatEta = (seconds: number): string => {
