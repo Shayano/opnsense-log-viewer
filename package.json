@@ -16,7 +16,11 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
-    "test:integration": "cargo test --manifest-path src-tauri/Cargo.toml --test tauri_commands_test"
+    "test:integration": "cargo test --manifest-path src-tauri/Cargo.toml --test tauri_commands_test",
+    "test:backend": "cd src-tauri && cargo test --all-features",
+    "test:all": "npm test -- --run && npm run test:backend",
+    "test:all:coverage": "npm run test:coverage && npm run test:backend",
+    "bench": "cd src-tauri && cargo bench"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.15",

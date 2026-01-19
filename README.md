@@ -16,7 +16,7 @@ High-performance desktop application for investigating OPNsense firewall logs (3
 
 ### Download Pre-Built Binaries (Recommended)
 
-Download the latest release for your platform from [GitHub Releases](https://github.com/yourusername/opnsense-log-viewer/releases):
+Download the latest release for your platform from [GitHub Releases](https://github.com/Shayano/opnsense-log-viewer/releases):
 
 - **Windows**: Download `.msi` or `.exe` installer
 - **macOS**: Download `.dmg` disk image
@@ -122,7 +122,14 @@ cargo build --release # Release build
 
 ## Testing
 
-This project has comprehensive test infrastructure established in **Story 0.2**:
+This project has comprehensive test infrastructure established in **Story 0.2**. All tests run locally.
+
+### Run All Tests
+
+```bash
+npm run test:all          # Run all frontend + backend tests
+npm run test:all:coverage # Run all tests with coverage reports
+```
 
 ### Frontend Testing (Vitest + React Testing Library)
 
@@ -137,6 +144,7 @@ npm run test:coverage    # Generate code coverage report
 ### Backend Unit Testing (Rust + cargo test)
 
 ```bash
+npm run test:backend     # Run all backend tests
 cd src-tauri
 cargo test               # Run all unit tests
 cargo test --release     # Run tests in release mode
@@ -151,6 +159,7 @@ cargo test parser        # Run tests for specific module
 ### Performance Benchmarking (criterion.rs)
 
 ```bash
+npm run bench            # Run all benchmarks
 cd src-tauri
 cargo bench              # Run all benchmarks with criterion
 cargo bench indexation   # Run specific benchmark suite
@@ -158,10 +167,10 @@ cargo bench indexation   # Run specific benchmark suite
 
 Benchmark results are generated as HTML reports in `src-tauri/target/criterion/`.
 
-**Performance Gates (CI/CD Enforced)**:
-- ❌ **BUILD FAILS** if indexation >8.05 sec/GB (7 sec/GB ±15%)
-- ❌ **BUILD FAILS** if query execution >1125ms (750ms ±50%)
-- ❌ **BUILD FAILS** if memory usage >720 MB (600 MB ±20%)
+**Performance Targets**:
+- Indexation: <7 sec/GB (±15%)
+- Query execution: <750ms (±50%)
+- Memory usage: <600 MB (±20%)
 
 ### Property-Based Testing (proptest)
 
@@ -209,14 +218,6 @@ Fixtures are generated in `tests/fixtures/` with realistic OPNsense data pattern
 - CSV filterlog format (OPNsense-specific)
 
 ⚠️ **Note**: Test fixtures are gitignored (30GB files should not be committed).
-
-### CI/CD Pipelines
-
-Automated testing runs on every push and pull request:
-
-- **`.github/workflows/test.yml`**: Frontend + Backend unit tests
-- **`.github/workflows/bench.yml`**: Performance benchmarks with gates
-- **`.github/workflows/build.yml`**: Multi-platform builds (Windows, macOS, Linux)
 
 ## Project Structure
 
