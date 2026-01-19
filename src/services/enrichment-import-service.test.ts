@@ -17,16 +17,27 @@ vi.mock('react-hot-toast', () => ({
   },
 }));
 
+// Mock console methods to prevent noise and unhandled errors
+const mockConsoleError = vi.fn();
+const mockConsoleWarn = vi.fn();
+const originalConsoleError = console.error;
+const originalConsoleWarn = console.warn;
+
 // Mock browser alert and confirm
 const mockAlert = vi.fn();
 const mockConfirm = vi.fn();
-global.alert = mockAlert;
-global.confirm = mockConfirm;
+const originalAlert = global.alert;
+const originalConfirm = global.confirm;
 
 describe('enrichment-import-service', () => {
   const mockInvoke = invoke as any;
 
   beforeEach(() => {
+    // Setup mocks
+    global.alert = mockAlert;
+    global.confirm = mockConfirm;
+    console.error = mockConsoleError;
+    console.warn = mockConsoleWarn;
     vi.clearAllMocks();
     useEnrichmentStore.setState({
       interfaceMappings: new Map(),
@@ -35,6 +46,14 @@ describe('enrichment-import-service', () => {
       backupEnrichmentActive: false,
       backupMetadata: null,
     });
+  });
+
+  afterEach(() => {
+    // Restore original globals to prevent test pollution
+    global.alert = originalAlert;
+    global.confirm = originalConfirm;
+    console.error = originalConsoleError;
+    console.warn = originalConsoleWarn;
   });
 
   describe('importEnrichmentData', () => {

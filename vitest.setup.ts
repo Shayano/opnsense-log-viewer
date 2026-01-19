@@ -43,3 +43,18 @@ const localStorageMock = (() => {
 Object.defineProperty(window, 'localStorage', {
   value: localStorageMock,
 });
+
+// Mock Tauri internals to prevent unhandled errors in tests
+(global as any).window = (global as any).window || {};
+(global as any).window.__TAURI_INTERNALS__ = {
+  transformCallback: (callback: any, once = false) => {
+    return callback;
+  },
+};
+
+// Mock Tauri event API
+import { vi } from 'vitest';
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(() => Promise.resolve(() => {})),
+  emit: vi.fn(() => Promise.resolve()),
+}));

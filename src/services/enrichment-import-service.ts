@@ -38,22 +38,17 @@ interface ImportResult {
  * @returns true if import succeeded, false if cancelled/failed
  */
 export async function importEnrichmentData(): Promise<boolean> {
-  console.log('[Import] Starting enrichment data import workflow');
 
   try {
     // Step 1: Open file picker
-    console.log('[Import] Opening file picker dialog');
     const filePath = await invoke<string | null>('open_enrichment_file_picker');
 
     if (!filePath) {
-      console.log('[Import] User cancelled file picker');
       return false; // User cancelled file picker
     }
 
-    console.log('[Import] Selected file:', filePath);
 
     // Step 2: Validate enrichment file
-    console.log('[Import] Validating enrichment file');
     const validation = await invoke<ImportValidation>('validate_enrichment_import', {
       filePath,
     });
@@ -64,10 +59,6 @@ export async function importEnrichmentData(): Promise<boolean> {
       return false;
     }
 
-    console.log('[Import] Validation passed:', {
-      ageDays: validation.ageDays,
-      isStale: validation.isStale,
-    });
 
     // Step 3: Check for staleness (>7 days)
     if (validation.isStale && validation.ageDays && validation.metadata) {
@@ -98,27 +89,23 @@ export async function importEnrichmentData(): Promise<boolean> {
     });
 
     // Step 5b: Reload all enrichment data from backend cache to frontend store
-    console.log('[Import] Reloading enrichment data into frontend store');
     try {
       // Reload interface mappings
       const interfaceMappings = await invoke<any>('get_interface_mappings_cmd');
       if (interfaceMappings) {
         store.setInterfaceMappings(interfaceMappings);
-        console.log('[Import] Interface mappings reloaded:', interfaceMappings.mappings);
       }
 
       // Reload rule labels
       const ruleLabels = await invoke<Record<string, string>>('get_rule_labels');
       if (ruleLabels) {
         store.setRuleLabels(ruleLabels);
-        console.log('[Import] Rule labels reloaded:', Object.keys(ruleLabels).length, 'rules');
       }
 
       // Reload aliases
       const aliases = await invoke<Record<string, any>>('get_aliases');
       if (aliases) {
         store.setAliases(aliases);
-        console.log('[Import] Aliases reloaded:', Object.keys(aliases).length, 'aliases');
       }
     } catch (error) {
       console.warn('[Import] Failed to reload some enrichment data:', error);
@@ -131,13 +118,6 @@ export async function importEnrichmentData(): Promise<boolean> {
       { duration: 4000 }
     );
 
-    console.log('[Import] Successfully imported enrichment data:', {
-      interfaces: result.interfacesImported,
-      rules: result.rulesImported,
-      aliases: result.aliasesImported,
-      ageDays: result.ageDays,
-      deviceId: result.deviceId,
-    });
 
     return true;
 
@@ -196,6 +176,5 @@ async function showStaleEnrichmentWarning(data: {
 
   // Use browser confirm for now (will be replaced with modal dialog in Story 4.3)
   const result = confirm(message);
-  console.log('[Import] User staleness warning response:', result ? 'Continue' : 'Cancel');
   return result;
 }

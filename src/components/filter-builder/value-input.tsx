@@ -53,7 +53,7 @@ export function ValueInput({ fieldType, operatorType, value, onChange, error }: 
               border border-gray-300 dark:border-gray-700 rounded
               text-gray-900 dark:text-gray-100 font-mono text-sm
               focus:ring-2 focus:ring-blue-500"
-            aria-label="Interface name"
+            aria-label="Value"
           />
           {error && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -115,7 +115,7 @@ export function ValueInput({ fieldType, operatorType, value, onChange, error }: 
               border border-gray-300 dark:border-gray-700 rounded
               text-gray-900 dark:text-gray-100 font-mono text-sm
               focus:ring-2 focus:ring-blue-500"
-            aria-label="Rule label"
+            aria-label="Value"
           />
           {error && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -334,7 +334,7 @@ export function ValueInput({ fieldType, operatorType, value, onChange, error }: 
             border border-gray-300 dark:border-gray-700 rounded
             text-gray-900 dark:text-gray-100
             focus:ring-2 focus:ring-blue-500"
-          aria-label="Port number"
+          aria-label="Value"
         />
         {error && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
       </div>
@@ -368,7 +368,7 @@ export function ValueInput({ fieldType, operatorType, value, onChange, error }: 
             border border-gray-300 dark:border-gray-700 rounded
             text-gray-900 dark:text-gray-100 font-mono text-sm
             focus:ring-2 focus:ring-blue-500"
-          aria-label="IP address"
+          aria-label="Value"
         />
         <datalist id="ip-autocomplete">
           {ipAutocompleteOptions.map((option, index) => (
