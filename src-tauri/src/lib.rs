@@ -8,6 +8,7 @@ pub mod query;
 mod api_client; // Story 3.1: API client and connection setup
 mod credentials; // Story 3.1: Credential storage
 mod state; // Story 3.2: Application state management
+mod export; // Story 5.1: Export functionality
 
 // Re-export types for use in other modules
 pub use types::{FileMetadata, IndexMetadata};
@@ -109,6 +110,10 @@ pub fn run() {
             api_client::commands::clear_backup_enrichment,
             api_client::commands::set_staleness_indicator_dismissed,
             api_client::commands::get_staleness_indicator_dismissed,
+            // Story 5.1: Export Functionality
+            export::commands::export_filtered_results,
+            export::commands::cancel_export,
+            export::commands::open_export_location,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

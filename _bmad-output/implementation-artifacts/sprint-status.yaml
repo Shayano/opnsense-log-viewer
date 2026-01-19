@@ -101,8 +101,8 @@ development_status:
     4-2-enrichment-data-import-with-validation: done # Code Review complete - 5 issues auto-fixed (1 CRITICAL, 2 MEDIUM, 2 LOW), 7 action items remain (type mismatch, integration tests, frontend tests)
     4-3-staleness-indicators-warnings: done # Code Review complete - 8 HIGH + 3 MEDIUM + 2 LOW issues auto-fixed, frontend implementation 100% complete
     epic-4-retrospective: optional
-    epic-5: backlog
-    5-1-filtered-result-export-csv-json-with-metadata: backlog
+    epic-5: in-progress
+    5-1-filtered-result-export-csv-json-with-metadata: done
     5-2-full-dataset-export-with-streaming: backlog
     5-3-export-integrity-verification: backlog
     epic-5-retrospective: optional
