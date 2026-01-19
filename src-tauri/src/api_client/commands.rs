@@ -1,5 +1,5 @@
 use tauri::{command, AppHandle, Emitter, State};
-use crate::api_client::types::{AliasMapping, ApiCredentials, ApiReconnectedEvent, CacheStatus, ConnectionInfo, ConnectionResult, ConnectionStatus, ConnectionTestResult, ExportedEnrichmentData, ExportMetadata, ExportResult, ImportResult, ImportValidation, InterfaceMappingCache};
+use crate::api_client::types::{AliasMapping, ApiCredentials, CacheStatus, ConnectionInfo, ConnectionStatus, ConnectionTestResult, ExportedEnrichmentData, ExportMetadata, ExportResult, ImportResult, ImportValidation, InterfaceMappingCache};
 use crate::api_client::client::test_connection;
 use crate::api_client::enrichment::{calculate_config_hash, calculate_enrichment_age, fetch_aliases_batch, fetch_interface_mappings, fetch_opnsense_version, fetch_rule_labels_batch, ENRICHMENT_STALENESS_THRESHOLD_DAYS};
 use crate::credentials::{manager, encrypted_storage};
@@ -456,10 +456,11 @@ pub async fn export_enrichment_data(
 /// Save enrichment export to file with dialog
 #[command]
 pub async fn save_enrichment_export(
+    app: AppHandle,
     json_data: String,
     filename: String,
 ) -> Result<String, String> {
-    use tauri::api::dialog::blocking::FileDialogBuilder;
+    use tauri_plugin_dialog::DialogExt;
     use std::fs;
     use std::io::Write;
 
@@ -471,15 +472,20 @@ pub async fn save_enrichment_export(
         .ok_or("Failed to determine download directory")?;
 
     // Open save file dialog
-    let file_path = FileDialogBuilder::new()
+    let file_path = app.dialog()
+        .file()
         .set_directory(&downloads_dir)
         .set_file_name(&filename)
         .add_filter("JSON Files", &["json"])
-        .save_file()
+        .blocking_save_file()
         .ok_or("Save dialog cancelled")?;
 
+    // Convert FilePath to PathBuf
+    let file_path_buf = file_path.into_path()
+        .map_err(|e| format!("Failed to convert file path: {}", e))?;
+
     // Atomic write: write to temp file first, then rename
-    let temp_path = file_path.with_extension("json.tmp");
+    let temp_path = file_path_buf.with_extension("json.tmp");
 
     let mut file = fs::File::create(&temp_path)
         .map_err(|e| format!("Failed to create file: {}", e))?;
@@ -493,10 +499,10 @@ pub async fn save_enrichment_export(
     drop(file); // Close file before rename
 
     // Atomic rename
-    fs::rename(&temp_path, &file_path)
+    fs::rename(&temp_path, &file_path_buf)
         .map_err(|e| format!("Failed to finalize file: {}", e))?;
 
-    let saved_path = file_path.to_string_lossy().to_string();
+    let saved_path = file_path_buf.to_string_lossy().to_string();
     info!("Enrichment export saved to: {}", saved_path);
 
     Ok(saved_path)
@@ -510,7 +516,7 @@ pub fn open_folder(file_path: String) -> Result<(), String> {
     use std::process::Command;
 
     let path = std::path::Path::new(&file_path);
-    let directory = path.parent()
+    let _directory = path.parent()
         .ok_or("Invalid file path")?;
 
     #[cfg(target_os = "windows")]
@@ -531,7 +537,7 @@ pub fn open_folder(file_path: String) -> Result<(), String> {
 
     #[cfg(target_os = "linux")]
     {
-        let dir_str = directory.to_string_lossy();
+        let dir_str = _directory.to_string_lossy();
         Command::new("xdg-open")
             .arg(&*dir_str)
             .spawn()
@@ -867,8 +873,8 @@ fn transform_aliases_for_import(
 /// - Some(file_path) if user selects a file
 /// - None if user cancels dialog
 #[command]
-pub async fn open_enrichment_file_picker() -> Result<Option<String>, String> {
-    use tauri::api::dialog::blocking::FileDialogBuilder;
+pub async fn open_enrichment_file_picker(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
 
     info!("Opening file picker for enrichment import");
 
@@ -878,13 +884,19 @@ pub async fn open_enrichment_file_picker() -> Result<Option<String>, String> {
         .ok_or("Failed to determine download directory")?;
 
     // Open file picker dialog
-    let file_path = FileDialogBuilder::new()
+    let file_path = app.dialog()
+        .file()
         .set_directory(&downloads_dir)
         .add_filter("Enrichment Files", &["json"])
-        .pick_file();
+        .blocking_pick_file();
 
     match file_path {
-        Some(path) => Ok(Some(path.to_string_lossy().to_string())),
+        Some(path) => {
+            let path_buf = path.into_path()
+                .map_err(|e| format!("Failed to convert file path: {}", e))?;
+            let path_str: String = path_buf.to_string_lossy().to_string();
+            Ok(Some(path_str))
+        },
         None => Ok(None), // User cancelled
     }
 }
@@ -935,9 +947,9 @@ pub async fn reconnect_api(
             );
 
             // Update cache with fresh data
-            let interfaces = interfaces_result.map_err(|e| format!("Failed to fetch interfaces: {}", e))?;
-            let rule_labels = rule_labels_result.map_err(|e| format!("Failed to fetch rule labels: {}", e))?;
-            let aliases = aliases_result.map_err(|e| format!("Failed to fetch aliases: {}", e))?;
+            let interfaces: HashMap<String, String> = interfaces_result.map_err(|e| format!("Failed to fetch interfaces: {}", e))?;
+            let rule_labels: HashMap<String, String> = rule_labels_result.map_err(|e| format!("Failed to fetch rule labels: {}", e))?;
+            let aliases: HashMap<String, Vec<crate::api_client::types::AliasMapping>> = aliases_result.map_err(|e| format!("Failed to fetch aliases: {}", e))?;
 
             cache_state.set_interface_mappings(interfaces.clone(), credentials.endpoint_url.clone());
             cache_state.set_rule_labels(rule_labels.clone(), credentials.endpoint_url.clone());

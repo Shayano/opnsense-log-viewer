@@ -4,7 +4,8 @@ use crate::export::types::{
     ExportFormat, ExportLogEntry, ExportMetadata, ExportProgress, ExportResult,
     ExportEstimate, ExportScope, VerificationResult,
 };
-use crate::export::utils::{check_disk_space, calculate_file_checksum, detect_incomplete_exports, cleanup_partial_export};
+use crate::export::utils::{check_disk_space, detect_incomplete_exports, cleanup_partial_export};
+use lazy_static::lazy_static;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::PathBuf;
@@ -13,8 +14,10 @@ use std::sync::Arc;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 
-/// Global cancellation flag for export operations
-static EXPORT_CANCELLED: AtomicBool = AtomicBool::new(false);
+lazy_static! {
+    /// Global cancellation flag for export operations
+    static ref EXPORT_CANCELLED: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+}
 
 /// Estimate export file size and duration for warning dialog
 #[tauri::command]
@@ -100,7 +103,8 @@ pub async fn export_filtered_results(
 
     // Perform export in background
     let app_clone = app.clone();
-    let cancel_flag = Arc::new(EXPORT_CANCELLED);
+    let cancel_flag = Arc::clone(&EXPORT_CANCELLED);
+    let save_path_for_cleanup = save_path_buf.clone();
     let result = tokio::task::spawn_blocking(move || {
         if use_streaming {
             // Streaming mode - memory efficient for large datasets
@@ -175,7 +179,7 @@ pub async fn export_filtered_results(
     // Check if cancelled
     if EXPORT_CANCELLED.load(Ordering::SeqCst) {
         // Clean up partial file
-        let _ = std::fs::remove_file(&save_path_buf);
+        let _ = std::fs::remove_file(&save_path_for_cleanup);
         return Err("Export cancelled by user".to_string());
     }
 
@@ -306,7 +310,6 @@ fn verify_csv_export(path: &PathBuf, file_size_bytes: u64) -> Result<Verificatio
 /// This matches how the export process calculates the checksum
 fn calculate_csv_content_checksum(path: &PathBuf) -> Result<String, String> {
     use sha2::{Digest, Sha256};
-    use std::io::Write;
 
     let file = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
     let reader = BufReader::new(file);
