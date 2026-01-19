@@ -79,7 +79,7 @@ development_status:
     1-1-file-selection-with-native-os-picker: done
     1-2-multi-format-log-parser-rfc3164-rfc5424-csv: done
     1-3-hybrid-index-creation-inverted-bitmap: done
-    1-4-index-persistence-reuse-with-sha256: done # Code Review #2 complete - all issues fixed
+    1-4-index-persistence-reuse-with-sha256: done
     1-5-log-entry-display-table-with-virtual-scrolling: done
     1-6-entry-detail-view-with-copy-functionality: done # Code Review complete - 9 issues fixed, integration tests remain
     epic-1-retrospective: optional
@@ -103,6 +103,6 @@ development_status:
     epic-4-retrospective: optional
     epic-5: in-progress
     5-1-filtered-result-export-csv-json-with-metadata: done
-    5-2-full-dataset-export-with-streaming: done # Code Review complete - 7 issues auto-fixed (4 HIGH, 2 MEDIUM, 1 LOW), backend streaming complete, frontend NOT implemented
+    5-2-full-dataset-export-with-streaming: done # Frontend implementation complete - ExportDialog, ExportWarningModal, ExportProgressModal with elapsed/remaining time, estimateExport & executeStreamingExport services added
     5-3-export-integrity-verification: done # Code Review in-progress - 6 CRITICAL checksum bugs auto-fixed, frontend pending
     epic-5-retrospective: optional

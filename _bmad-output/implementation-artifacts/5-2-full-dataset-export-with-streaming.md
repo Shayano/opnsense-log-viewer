@@ -1,6 +1,6 @@
 # Story 5.2: Full Dataset Export with Streaming
 
-Status: in-progress
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -137,56 +137,56 @@ So that I can create complete backups of log data in portable formats without me
   - [x] Add ExportWarningModalProps interface
   - [x] Update ExportMetadata to include exportScope field
 
-- [ ] Update ExportDialog component (AC: Scope selection)
-  - [ ] Add export scope radio buttons:
+- [x] Update ExportDialog component (AC: Scope selection)
+  - [x] Add export scope radio buttons:
     - [Filtered Results (X entries)]
     - [Full Dataset (Y entries)]
-  - [ ] Default selection: Filtered Results
-  - [ ] Display entry counts dynamically
-  - [ ] Enable/disable full dataset if no data loaded
-  - [ ] Update preview section based on selection
-  - [ ] Preserve format selection (CSV/JSON) when switching scope
+  - [x] Default selection: Filtered Results
+  - [x] Display entry counts dynamically
+  - [x] Enable/disable full dataset if no data loaded
+  - [x] Update preview section based on selection
+  - [x] Preserve format selection (CSV/JSON) when switching scope
 
-- [ ] Create ExportWarningModal component (AC: Warning dialog)
-  - [ ] Create ExportWarningModal in components/dialogs/
-  - [ ] Display warning: "⚠️ Export X entries? This may take several minutes."
-  - [ ] Show estimate:
+- [x] Create ExportWarningModal component (AC: Warning dialog)
+  - [x] Create ExportWarningModal in components/dialogs/
+  - [x] Display warning: "⚠️ Export X entries? This may take several minutes."
+  - [x] Show estimate:
     - Estimated time: "[X] minutes"
     - Estimated file size: "[Y] MB"
-  - [ ] [Continue] and [Cancel] buttons
-  - [ ] Use Radix UI Dialog component
-  - [ ] Dark/light theme support
-  - [ ] Accessible (ARIA, keyboard nav)
+  - [x] [Continue] and [Cancel] buttons
+  - [x] Use Radix UI Dialog component
+  - [x] Dark/light theme support
+  - [x] Accessible (ARIA, keyboard nav)
 
-- [ ] Update export service for streaming (AC: Export workflow)
-  - [ ] Add estimateExport() function in export-service.ts
-  - [ ] Call estimate_export command when Full Dataset selected
-  - [ ] Show ExportWarningModal with estimate
-  - [ ] If Continue → executeStreamingExport()
-  - [ ] Add executeStreamingExport() function:
+- [x] Update export service for streaming (AC: Export workflow)
+  - [x] Add estimateExport() function in export-service.ts
+  - [x] Call estimate_export command when Full Dataset selected
+  - [x] Show ExportWarningModal with estimate
+  - [x] If Continue → executeStreamingExport()
+  - [x] Add executeStreamingExport() function:
     - Calls export_filtered_results with streaming=true
     - Updates progress modal with different thresholds (5000 rows)
     - Shows elapsed time and estimated remaining
-  - [ ] Handle cancellation: call cancel_export, delete partial file
-  - [ ] Handle completion: success toast with "Open Folder" button
-  - [ ] Handle errors: error toast with guidance
+  - [x] Handle cancellation: call cancel_export, delete partial file
+  - [x] Handle completion: success toast with "Open Folder" button
+  - [x] Handle errors: error toast with guidance
 
-- [ ] Update ExportProgressModal (AC: Progress display)
-  - [ ] Update progress text for full dataset: "Exporting full dataset... X of Y"
-  - [ ] Show elapsed time: "Elapsed: [X]s"
-  - [ ] Show estimated remaining: "Remaining: ~[Y]s"
-  - [ ] Update progress bar smoothly (0-100%)
-  - [ ] Show export speed: "[X] rows/sec"
-  - [ ] [Cancel] button remains functional
-  - [ ] Auto-close on completion
+- [x] Update ExportProgressModal (AC: Progress display)
+  - [x] Update progress text for full dataset: "Exporting full dataset... X of Y"
+  - [x] Show elapsed time: "Elapsed: [X]s"
+  - [x] Show estimated remaining: "Remaining: ~[Y]s"
+  - [x] Update progress bar smoothly (0-100%)
+  - [x] Show export speed: "[X] rows/sec"
+  - [x] [Cancel] button remains functional
+  - [x] Auto-close on completion
 
-- [ ] Add disk space validation (AC: Graceful failure)
-  - [ ] Call check_disk_space before export
-  - [ ] If insufficient space:
+- [x] Add disk space validation (AC: Graceful failure)
+  - [x] Call check_disk_space before export
+  - [x] If insufficient space:
     - Show error dialog: "Insufficient disk space. Required: [X] MB, Available: [Y] MB"
     - Suggest: "Free up space or choose a different location."
     - Return to export dialog
-  - [ ] Handle error gracefully (no crash)
+  - [x] Handle error gracefully (no crash)
 
 ### Testing
 
