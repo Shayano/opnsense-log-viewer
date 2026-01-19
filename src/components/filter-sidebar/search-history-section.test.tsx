@@ -133,7 +133,7 @@ describe('SearchHistorySection', () => {
       });
 
       render(<SearchHistorySection />);
-      expect(screen.queryByText(/Clear All/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Clear All/i })).not.toBeInTheDocument();
     });
 
     it('should render Re-run and Delete buttons for each entry', () => {

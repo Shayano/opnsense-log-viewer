@@ -86,7 +86,7 @@ describe('FilterBuilder', () => {
     });
 
     // Submit form
-    const submitButton = screen.getByText('Add Filter');
+    const submitButton = screen.getByRole('button', { name: 'Add Filter' });
     fireEvent.click(submitButton);
 
     await waitFor(() => {
@@ -164,7 +164,7 @@ describe('FilterBuilder', () => {
   it('should disable submit button when form is incomplete', () => {
     render(<FilterBuilder isOpen={true} onClose={vi.fn()} editingFilter={null} />);
 
-    const submitButton = screen.getByText('Add Filter');
+    const submitButton = screen.getByRole('button', { name: 'Add Filter' });
     expect(submitButton).toBeDisabled();
   });
 
@@ -186,7 +186,7 @@ describe('FilterBuilder', () => {
     });
 
     await waitFor(() => {
-      const submitButton = screen.getByText('Add Filter');
+      const submitButton = screen.getByRole('button', { name: 'Add Filter' });
       expect(submitButton).not.toBeDisabled();
     });
   });
@@ -208,7 +208,7 @@ describe('FilterBuilder', () => {
       fireEvent.change(valueSelect, { target: { value: 'block' } });
     });
 
-    const submitButton = screen.getByText('Add Filter');
+    const submitButton = screen.getByRole('button', { name: 'Add Filter' });
     fireEvent.click(submitButton);
 
     await waitFor(() => {
@@ -220,7 +220,7 @@ describe('FilterBuilder', () => {
     render(<FilterBuilder isOpen={true} onClose={vi.fn()} editingFilter={null} />);
 
     // Try to submit without filling form
-    const submitButton = screen.getByText('Add Filter');
+    const submitButton = screen.getByRole('button', { name: 'Add Filter' });
 
     // Submit button should be disabled, but test the validation logic
     expect(submitButton).toBeDisabled();

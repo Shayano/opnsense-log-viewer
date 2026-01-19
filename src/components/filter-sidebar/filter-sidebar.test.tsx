@@ -1,7 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FilterSidebar } from './filter-sidebar';
 import { useFilterStore } from '@/stores/filter-store';
+import { useSearchHistoryStore } from '@/stores/search-history-store';
+
+// Mock useSearchHistoryStore
+vi.mock('@/stores/search-history-store', () => ({
+  useSearchHistoryStore: vi.fn(() => ({
+    searchHistory: [],
+    addSearchToHistory: vi.fn(),
+    deleteHistoryEntry: vi.fn(),
+    clearAllHistory: vi.fn(),
+  })),
+}));
 
 // Mock localStorage
 const localStorageMock = (() => {
@@ -20,6 +31,7 @@ describe('FilterSidebar', () => {
     useFilterStore.setState({
       filters: [],
       draftMode: false,
+      savedFilters: [],
     });
     localStorageMock.clear();
   });
@@ -30,10 +42,17 @@ describe('FilterSidebar', () => {
     expect(screen.getByText('Add Filter')).toBeInTheDocument();
   });
 
-  it('should display empty state when no filters', () => {
-    render(<FilterSidebar />);
-    expect(screen.getByText('No filters added yet.')).toBeInTheDocument();
-    expect(screen.getByText('Click "Add Filter" to start.')).toBeInTheDocument();
+  it('should display empty state when no filters', async () => {
+    const { container } = render(<FilterSidebar />);
+
+    // Wait for component to render
+    await waitFor(() => {
+      expect(container.querySelector('.text-center')).toBeInTheDocument();
+    });
+
+    // Check for empty state text
+    expect(screen.getByText(/No filters added yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/Add Filter.*to start/i)).toBeInTheDocument();
   });
 
   it('should collapse sidebar when collapse button is clicked', () => {
@@ -140,7 +159,7 @@ describe('FilterSidebar', () => {
 
     render(<FilterSidebar />);
 
-    expect(screen.queryByText(/Search/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Search \(/)).not.toBeInTheDocument();
   });
 
   it('should open FilterBuilder modal when Add Filter is clicked', () => {
@@ -162,17 +181,27 @@ describe('FilterSidebar', () => {
     expect(screen.getByLabelText('Clear all filters')).toBeInTheDocument();
   });
 
-  it('should clear all filters when Clear All is clicked', () => {
+  it('should clear all filters when Clear All is clicked', async () => {
     const { addFilter } = useFilterStore.getState();
     addFilter({ field: 'sourceIp', operator: 'equals', value: '192.168.1.1' });
     addFilter({ field: 'destinationPort', operator: 'equals', value: 443 });
 
     render(<FilterSidebar />);
 
+    // Click the "Clear all filters" button to open dialog
     const clearButton = screen.getByLabelText('Clear all filters');
     fireEvent.click(clearButton);
 
-    const state = useFilterStore.getState();
-    expect(state.filters).toHaveLength(0);
+    // Wait for dialog to appear and click the confirmation button
+    await waitFor(() => {
+      const confirmButton = screen.getByRole('button', { name: 'Clear All' });
+      fireEvent.click(confirmButton);
+    });
+
+    // Verify filters are cleared
+    await waitFor(() => {
+      const state = useFilterStore.getState();
+      expect(state.filters).toHaveLength(0);
+    });
   });
 });
