@@ -1,6 +1,6 @@
 # Story 2.4: Search History with Persistence
 
-Status: review
+Status: done
 
 ## Story
 

@@ -75,44 +75,44 @@ development_status:
     0-2-comprehensive-test-infrastructure: done
     0-3-tailwind-css-design-system-foundation: done
     epic-0-retrospective: optional
-    epic-1: in-progress
+    epic-1: done
     1-1-file-selection-with-native-os-picker: done
     1-2-multi-format-log-parser-rfc3164-rfc5424-csv: done
     1-3-hybrid-index-creation-inverted-bitmap: done
     1-4-index-persistence-reuse-with-sha256: done
     1-5-log-entry-display-table-with-virtual-scrolling: done
-    1-6-entry-detail-view-with-copy-functionality: done # Code Review + Phase 2 complete - 9 issues fixed, 8 integration tests added (copy workflows, open/close/reopen, entry switching)
+    1-6-entry-detail-view-with-copy-functionality: done
     epic-1-retrospective: optional
-    epic-2: in-progress
+    epic-2: done
     2-1-visual-filter-builder-ui: done
     2-2-query-execution-engine-with-boolean-logic: done
-    2-3-filter-management-save-load-delete: done # Code Review + Phase 2 tests complete - Migration system implemented, 45 tests passing (36 component + 9 integration)
+    2-3-filter-management-save-load-delete: done
     2-4-search-history-with-persistence: done
     epic-2-retrospective: optional
     epic-3: in-progress
     3-1-api-connection-setup-with-credential-storage: done
     3-2-interface-name-mapping-physical-to-logical: done
-    3-3-rule-label-enrichment-hash-to-description: done # FilterBuilder autocomplete COMPLETED + Phase 2 complete - dropdown shows descriptions, stores hashes. 9 frontend tests added (4 utils + 5 hooks)
-    3-4-alias-resolution-ip-groups: done # Code Review complete - 2 auto-fixed (logging, .expect()), 6 action items remain (tests, UI integration)
+    3-3-rule-label-enrichment-hash-to-description: done
+    3-4-alias-resolution-ip-groups: in-progress # 6 action items remain from code review (tests, UI integration)
     3-5-graceful-degradation-offline-mode: done
     epic-3-retrospective: optional
-    epic-4: in-progress
-    4-1-enrichment-data-export-to-json: done # Code Review + Phase 2 complete - 10 issues auto-fixed (3 HIGH, 4 MEDIUM, 3 LOW), 13 tests added (7 integration + 3 performance + 3 workflow)
-    4-2-enrichment-data-import-with-validation: done # Phase 2 complete - 2 CRITICAL bugs fixed (setRuleLabels/setAliases Map→Record), 2 previous CRITICAL issues fixed (BackupEnrichment, cache reload), 9 comprehensive tests added
-    4-3-staleness-indicators-warnings: done # Code Review complete - 8 HIGH + 3 MEDIUM + 2 LOW issues auto-fixed, frontend implementation 100% complete
+    epic-4: done
+    4-1-enrichment-data-export-to-json: done
+    4-2-enrichment-data-import-with-validation: done
+    4-3-staleness-indicators-warnings: done
     epic-4-retrospective: optional
-    epic-5: in-progress
+    epic-5: done
     5-1-filtered-result-export-csv-json-with-metadata: done
-    5-2-full-dataset-export-with-streaming: done # Frontend implementation complete - ExportDialog, ExportWarningModal, ExportProgressModal with elapsed/remaining time, estimateExport & executeStreamingExport services added
-    5-3-export-integrity-verification: done # Frontend implementation complete - Success toast with checksum, ExportVerificationModal, VerifyExportDialog, partial file detection on startup
+    5-2-full-dataset-export-with-streaming: done
+    5-3-export-integrity-verification: done
     epic-5-retrospective: optional
 
 # ============================================================================
 # PROJECT STATUS SUMMARY (Updated: 2026-01-19)
 # ============================================================================
 #
-# ✅ ALL EPICS COMPLETE (5/5)
-# ✅ ALL STORIES COMPLETE (21/21)
+# ⚠️ EPICS: 5/6 COMPLETE (Epic 3 has 1 in-progress story)
+# ⚠️ STORIES: 20/21 COMPLETE (Story 3-4 has 6 action items remaining)
 # ✅ PHASE 2 TEST IMPLEMENTATION COMPLETE (84 new tests, 100% passing)
 # ✅ PRE-EXISTING TEST FIXES COMPLETE (11 tests fixed, 100% passing)
 #
@@ -152,23 +152,27 @@ development_status:
 # - filter-sidebar.test.tsx: 3 tests fixed (regex, dialogs, mocks)
 # - search-history-section.test.tsx: 1 test fixed (queryByRole)
 #
-# WHAT'S NEXT (OPTIONAL):
-# =======================
-# 1. Run retrospectives for completed epics (optional)
+# WHAT'S NEXT:
+# ============
+# 1. Complete Story 3-4 (Alias Resolution) - 6 action items remain:
+#    - [CRITICAL] Add backend unit tests (alias API, cache)
+#    - [CRITICAL] Add frontend unit tests (useIPAlias hook, utilities)
+#    - [CRITICAL] Implement LogTable integration (display IP aliases)
+#    - [CRITICAL] Implement auto-enrichment on log load
+#    - [MEDIUM] Load cached aliases on App.tsx startup
+#    - [MEDIUM] Implement FilterBuilder alias autocomplete
+#
+# 2. (Optional) Run retrospectives for completed epics
 #    - Use: /bmad:bmm:workflows:retrospective
 #    - Purpose: Extract lessons learned, identify improvements
 #
-# 2. Push commits to remote repository
+# 3. Push commits to remote repository
 #    - Branch: tauri-rewrite (18 commits ahead of origin)
 #    - Command: git push origin tauri-rewrite
 #
-# 3. Create pull request to main branch
+# 4. Create pull request to main branch
 #    - Use: gh pr create
 #    - Review comprehensive Phase 2 summary and test results
 #
-# 4. Plan next phase or features (if applicable)
-#    - Current application is feature-complete per original requirements
-#    - All core functionality implemented and tested
-#
-# PROJECT COMPLETION STATUS: ✅ READY FOR PRODUCTION
-# ====================================================
+# PROJECT COMPLETION STATUS: ⚠️ 95% COMPLETE (1 story in-progress)
+# ==================================================================

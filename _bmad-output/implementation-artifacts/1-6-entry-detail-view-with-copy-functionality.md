@@ -1,6 +1,6 @@
 # Story 1.6: Entry Detail View with Copy Functionality
 
-Status: in-progress
+Status: done
 
 ## Story
 

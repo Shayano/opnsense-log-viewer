@@ -1,6 +1,6 @@
 # Story 2.3: Filter Management (Save, Load, Delete)
 
-Status: in-progress
+Status: done
 
 ## Story
 

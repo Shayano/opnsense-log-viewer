@@ -1,6 +1,6 @@
 # Story 3.5: Graceful Degradation & Offline Mode
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 

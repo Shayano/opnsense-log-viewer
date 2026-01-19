@@ -1,6 +1,6 @@
 # Story 3.2: Interface Name Mapping (Physical to Logical)
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 

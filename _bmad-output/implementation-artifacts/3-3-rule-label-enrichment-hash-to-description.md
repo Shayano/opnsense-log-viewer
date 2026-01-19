@@ -1,6 +1,6 @@
 # Story 3.3: Rule Label Enrichment (Hash to Description)
 
-Status: in-progress
+Status: done
 
 ## Story
 

@@ -1,6 +1,6 @@
 # Story 4.1: Enrichment Data Export to JSON
 
-Status: in-progress
+Status: done
 
 ## Story
 

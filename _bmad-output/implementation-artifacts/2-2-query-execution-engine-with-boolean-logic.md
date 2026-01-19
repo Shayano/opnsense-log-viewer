@@ -1,6 +1,6 @@
 # Story 2.2: Query Execution Engine with Boolean Logic
 
-Status: review
+Status: done
 
 ## Story
 

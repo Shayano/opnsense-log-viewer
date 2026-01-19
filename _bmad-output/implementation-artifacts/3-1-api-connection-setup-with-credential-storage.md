@@ -1,6 +1,6 @@
 # Story 3.1: API Connection Setup with Credential Storage
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 

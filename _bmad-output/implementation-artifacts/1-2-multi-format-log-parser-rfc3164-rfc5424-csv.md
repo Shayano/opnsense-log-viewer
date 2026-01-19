@@ -1,6 +1,6 @@
 # Story 1.2: Multi-Format Log Parser (RFC3164, RFC5424, CSV)
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 

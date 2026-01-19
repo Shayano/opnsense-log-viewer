@@ -1,6 +1,6 @@
 # Story 2.1: Visual Filter Builder UI
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
