@@ -1,25 +1,28 @@
 import { useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { FileDown, X } from 'lucide-react';
-import type { ExportFormat } from '@/types/export';
+import type { ExportFormat, ExportScope } from '@/types/export';
 
 interface ExportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   totalEntries: number;
-  onExport: (format: ExportFormat) => void;
+  totalInSource: number;
+  onExport: (format: ExportFormat, scope: ExportScope) => void;
 }
 
 export function ExportDialog({
   open,
   onOpenChange,
   totalEntries,
+  totalInSource,
   onExport,
 }: ExportDialogProps) {
   const [selectedFormat, setSelectedFormat] = useState<ExportFormat>('csv');
+  const [selectedScope, setSelectedScope] = useState<ExportScope>('filtered');
 
   const handleExport = () => {
-    onExport(selectedFormat);
+    onExport(selectedFormat, selectedScope);
   };
 
   return (
@@ -55,14 +58,54 @@ export function ExportDialog({
           </Dialog.Description>
 
           <div className="mt-4 space-y-4">
-            {/* Export Scope */}
-            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-              <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+            {/* Export Scope Selection */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Export Scope
-              </p>
-              <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
-                Filtered Results: <span className="font-semibold">{totalEntries.toLocaleString()}</span> entries
-              </p>
+              </label>
+              <div className="space-y-2">
+                <label className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors">
+                  <input
+                    type="radio"
+                    name="scope"
+                    value="filtered"
+                    checked={selectedScope === 'filtered'}
+                    onChange={(e) => setSelectedScope(e.target.value as ExportScope)}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500"
+                  />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      Filtered Results
+                    </p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                      Export current filtered results ({totalEntries.toLocaleString()} entries)
+                    </p>
+                  </div>
+                </label>
+
+                <label className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors">
+                  <input
+                    type="radio"
+                    name="scope"
+                    value="fullDataset"
+                    checked={selectedScope === 'fullDataset'}
+                    onChange={(e) => setSelectedScope(e.target.value as ExportScope)}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500"
+                    disabled={totalInSource === 0}
+                  />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      Full Dataset
+                    </p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                      {totalInSource === 0
+                        ? 'No data loaded'
+                        : `Export complete unfiltered dataset (${totalInSource.toLocaleString()} entries)`
+                      }
+                    </p>
+                  </div>
+                </label>
+              </div>
             </div>
 
             {/* Format Selection */}

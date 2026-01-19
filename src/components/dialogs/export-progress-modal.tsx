@@ -17,6 +17,11 @@ export function ExportProgressModal({
     ? Math.round((progress.current / progress.total) * 100)
     : 0;
 
+  // Calculate estimated remaining time
+  const estimatedRemainingSeconds = progress && progress.rowsPerSecond > 0
+    ? (progress.total - progress.current) / progress.rowsPerSecond
+    : 0;
+
   const formatTime = (seconds: number): string => {
     if (seconds < 60) {
       return `${seconds.toFixed(1)}s`;
@@ -69,14 +74,18 @@ export function ExportProgressModal({
               </div>
 
               {/* Stats */}
-              <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+              <div className="grid grid-cols-3 gap-2 text-xs text-gray-600 dark:text-gray-400">
                 <div>
                   <span className="font-medium">Speed:</span>{' '}
                   {Math.round(progress.rowsPerSecond).toLocaleString()} rows/sec
                 </div>
-                <div>
+                <div className="text-center">
                   <span className="font-medium">Elapsed:</span>{' '}
                   {formatTime(progress.elapsedSeconds)}
+                </div>
+                <div className="text-right">
+                  <span className="font-medium">Remaining:</span>{' '}
+                  {estimatedRemainingSeconds > 0 ? `~${formatTime(estimatedRemainingSeconds)}` : 'Calculating...'}
                 </div>
               </div>
             </div>
