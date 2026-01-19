@@ -64,6 +64,28 @@ pub struct EnrichmentInfo {
     pub exported_at: Option<DateTime<Utc>>,
 }
 
+/// Export checksum for integrity verification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportChecksum {
+    /// Checksum algorithm (always "SHA-256")
+    pub algorithm: String,
+
+    /// Hex-encoded checksum
+    pub hash: String,
+}
+
+/// Export verification status
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportVerification {
+    /// Number of entries successfully written
+    pub entries_written: usize,
+
+    /// Whether export completed successfully
+    pub export_complete: bool,
+}
+
 /// Complete export metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -92,6 +114,14 @@ pub struct ExportMetadata {
     /// Enrichment status (if applicable)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enrichment_status: Option<EnrichmentInfo>,
+
+    /// Export checksum for integrity verification
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub export_checksum: Option<ExportChecksum>,
+
+    /// Verification status
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification: Option<ExportVerification>,
 }
 
 /// Export progress tracking
@@ -129,6 +159,12 @@ pub struct ExportResult {
 
     /// File size in bytes
     pub file_size_bytes: u64,
+
+    /// SHA-256 checksum of exported file
+    pub checksum: String,
+
+    /// Whether verification passed (entry count matches)
+    pub verification_passed: bool,
 }
 
 /// Export request from frontend
@@ -200,4 +236,25 @@ pub struct InsufficientDiskSpaceError {
 
     /// Available disk space in MB
     pub available_mb: f64,
+}
+
+/// Verification result for post-export verification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerificationResult {
+    /// Whether checksum is valid
+    pub valid: bool,
+
+    /// Expected checksum from file metadata
+    pub expected_hash: String,
+
+    /// Actual checksum calculated from file
+    pub actual_hash: String,
+
+    /// File size in bytes
+    pub file_size_bytes: u64,
+
+    /// Number of entries in file (if parseable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entries_count: Option<usize>,
 }

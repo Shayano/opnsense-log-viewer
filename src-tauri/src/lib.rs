@@ -116,6 +116,10 @@ pub fn run() {
             export::commands::open_export_location,
             // Story 5.2: Full Dataset Export with Streaming
             export::commands::estimate_export,
+            // Story 5.3: Export Integrity & Verification
+            export::commands::verify_export_file,
+            export::commands::detect_incomplete_export_files,
+            export::commands::cleanup_incomplete_export,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

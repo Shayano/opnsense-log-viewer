@@ -21,6 +21,17 @@ export interface EnrichmentInfo {
   exportedAt?: string;
 }
 
+// Story 5.3: Export Integrity & Verification types
+export interface ExportChecksum {
+  algorithm: string;
+  hash: string;
+}
+
+export interface ExportVerification {
+  entriesWritten: number;
+  exportComplete: boolean;
+}
+
 export interface ExportMetadata {
   exportedBy: string;
   exportDate: string;
@@ -30,6 +41,8 @@ export interface ExportMetadata {
   totalInSource: number;
   exportScope: ExportScope;
   enrichmentStatus?: EnrichmentInfo;
+  exportChecksum?: ExportChecksum;
+  verification?: ExportVerification;
 }
 
 export interface ExportProgress {
@@ -45,6 +58,8 @@ export interface ExportResult {
   entriesWritten: number;
   durationSeconds: number;
   fileSizeBytes: number;
+  checksum: string;
+  verificationPassed: boolean;
 }
 
 export interface ExportLogEntry {
@@ -89,4 +104,24 @@ export interface ExportWarningModalProps {
   estimate: ExportEstimate | null;
   onContinue: () => void;
   onCancel: () => void;
+}
+
+// Story 5.3: Verification result types
+export interface VerificationResult {
+  valid: boolean;
+  expectedHash: string;
+  actualHash: string;
+  fileSizeBytes: number;
+  entriesCount?: number;
+}
+
+export interface VerificationModalProps {
+  isOpen: boolean;
+  result: ExportResult | null;
+  onClose: () => void;
+}
+
+export interface VerifyExportDialogProps {
+  isOpen: boolean;
+  onClose: () => void;
 }

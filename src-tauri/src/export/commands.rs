@@ -2,9 +2,12 @@ use crate::export::csv::CsvExporter;
 use crate::export::json::JsonExporter;
 use crate::export::types::{
     ExportFormat, ExportLogEntry, ExportMetadata, ExportProgress, ExportResult,
-    ExportEstimate, ExportScope,
+    ExportEstimate, ExportScope, VerificationResult,
 };
-use crate::export::utils::check_disk_space;
+use crate::export::utils::{check_disk_space, calculate_file_checksum, detect_incomplete_exports, cleanup_partial_export};
+use std::fs::File;
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -215,6 +218,202 @@ pub async fn open_export_location(app: AppHandle, file_path: String) -> Result<(
         .map_err(|e| format!("Failed to open location: {}", e))?;
 
     Ok(())
+}
+
+/// Verify export file integrity by checking embedded checksum
+#[tauri::command]
+pub fn verify_export_file(file_path: String) -> Result<VerificationResult, String> {
+    let path = PathBuf::from(&file_path);
+
+    // Verify file exists
+    if !path.exists() {
+        return Err(format!("File not found: {}", file_path));
+    }
+
+    // Get file size
+    let file_size_bytes = std::fs::metadata(&path)
+        .map_err(|e| format!("Failed to read file metadata: {}", e))?
+        .len();
+
+    // Determine file type from extension
+    let extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .ok_or_else(|| "File has no extension".to_string())?;
+
+    match extension.to_lowercase().as_str() {
+        "csv" => verify_csv_export(&path, file_size_bytes),
+        "json" => verify_json_export(&path, file_size_bytes),
+        _ => Err(format!("Unsupported file format: {}", extension)),
+    }
+}
+
+/// Verify CSV export file
+fn verify_csv_export(path: &PathBuf, file_size_bytes: u64) -> Result<VerificationResult, String> {
+    // Read last 1 KB of file to find checksum
+    let file = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
+    let file_size = file.metadata().map_err(|e| format!("Failed to get metadata: {}", e))?.len();
+    let read_size = std::cmp::min(file_size, 1024);
+
+    let mut reader = BufReader::new(File::open(path).map_err(|e| format!("Failed to open file: {}", e))?);
+    if file_size > read_size {
+        reader
+            .seek(SeekFrom::End(-(read_size as i64)))
+            .map_err(|e| format!("Failed to seek: {}", e))?;
+    }
+
+    // Read lines and find checksum
+    let mut expected_hash = String::new();
+    let mut entries_count = None;
+
+    for line in reader.lines() {
+        let line = line.map_err(|e| format!("Failed to read line: {}", e))?;
+        if line.starts_with("# Export SHA-256:") {
+            expected_hash = line
+                .trim_start_matches("# Export SHA-256:")
+                .trim()
+                .to_string();
+        } else if line.starts_with("# Row Count Verification:") {
+            // Parse entry count
+            if let Some(count_str) = line.split_whitespace().nth(4) {
+                entries_count = count_str.parse().ok();
+            }
+        }
+    }
+
+    if expected_hash.is_empty() {
+        return Err("No checksum found in CSV file. File may be incomplete.".to_string());
+    }
+
+    // CRITICAL FIX: Calculate checksum on content ONLY (excluding checksum lines)
+    // Read file and write temporary file without checksum lines, then calculate checksum
+    let actual_hash = calculate_csv_content_checksum(path)
+        .map_err(|e| format!("Failed to calculate checksum: {}", e))?;
+
+    // Compare checksums
+    let valid = expected_hash == actual_hash;
+
+    Ok(VerificationResult {
+        valid,
+        expected_hash,
+        actual_hash,
+        file_size_bytes,
+        entries_count,
+    })
+}
+
+/// Calculate checksum of CSV content (excluding checksum comment lines)
+/// This matches how the export process calculates the checksum
+fn calculate_csv_content_checksum(path: &PathBuf) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Write;
+
+    let file = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
+    let reader = BufReader::new(file);
+
+    let mut hasher = Sha256::new();
+
+    // Read line by line, hash everything EXCEPT checksum lines
+    for line in reader.lines() {
+        let line = line.map_err(|e| format!("Failed to read line: {}", e))?;
+
+        // Skip checksum and row count verification lines
+        if line.starts_with("# Export SHA-256:") || line.starts_with("# Row Count Verification:") {
+            continue;
+        }
+
+        // Hash this line (including newline)
+        hasher.update(line.as_bytes());
+        hasher.update(b"\n");
+    }
+
+    // Finalize hash
+    let hash_bytes = hasher.finalize();
+    let hash_hex = format!("{:x}", hash_bytes);
+
+    Ok(hash_hex)
+}
+
+/// Verify JSON export file
+fn verify_json_export(path: &PathBuf, file_size_bytes: u64) -> Result<VerificationResult, String> {
+    // Read and parse JSON file
+    let file = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
+    let mut json: serde_json::Value = serde_json::from_reader(file)
+        .map_err(|e| format!("Failed to parse JSON: {}", e))?;
+
+    // Extract checksum from metadata
+    let expected_hash = json
+        .get("metadata")
+        .and_then(|m| m.get("exportChecksum"))
+        .and_then(|c| c.get("hash"))
+        .and_then(|h| h.as_str())
+        .ok_or_else(|| "No checksum found in JSON metadata. File may be incomplete.".to_string())?
+        .to_string();
+
+    // Extract entry count
+    let entries_count = json
+        .get("metadata")
+        .and_then(|m| m.get("verification"))
+        .and_then(|v| v.get("entriesWritten"))
+        .and_then(|e| e.as_u64())
+        .map(|c| c as usize);
+
+    // CRITICAL FIX: Calculate checksum WITHOUT exportChecksum and verification fields
+    // This matches how the export process calculates the checksum
+    // Remove exportChecksum and verification from metadata before calculating
+    if let Some(metadata) = json.get_mut("metadata") {
+        if let Some(metadata_obj) = metadata.as_object_mut() {
+            metadata_obj.remove("exportChecksum");
+            metadata_obj.remove("verification");
+        }
+    }
+
+    // Calculate checksum on JSON without exportChecksum/verification
+    let actual_hash = {
+        use sha2::{Digest, Sha256};
+        let json_without_checksum = serde_json::to_string_pretty(&json)
+            .map_err(|e| format!("Failed to serialize JSON: {}", e))?;
+        let mut hasher = Sha256::new();
+        hasher.update(json_without_checksum.as_bytes());
+        format!("{:x}", hasher.finalize())
+    };
+
+    // Compare checksums
+    let valid = expected_hash == actual_hash;
+
+    Ok(VerificationResult {
+        valid,
+        expected_hash,
+        actual_hash,
+        file_size_bytes,
+        entries_count,
+    })
+}
+
+/// Detect incomplete exports on app startup
+#[tauri::command]
+pub fn detect_incomplete_export_files(export_dir: String) -> Result<Vec<String>, String> {
+    let dir_path = PathBuf::from(export_dir);
+
+    let incomplete = detect_incomplete_exports(dir_path)
+        .map_err(|e| format!("Failed to detect incomplete exports: {}", e))?;
+
+    // Convert PathBuf to String
+    let incomplete_paths: Vec<String> = incomplete
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+
+    Ok(incomplete_paths)
+}
+
+/// Clean up incomplete/partial export file
+#[tauri::command]
+pub fn cleanup_incomplete_export(file_path: String) -> Result<(), String> {
+    let path = PathBuf::from(file_path);
+
+    cleanup_partial_export(path)
+        .map_err(|e| format!("Failed to cleanup partial export: {}", e))
 }
 
 #[cfg(test)]

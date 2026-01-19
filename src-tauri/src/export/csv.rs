@@ -1,4 +1,5 @@
 use crate::export::types::{ExportMetadata, ExportLogEntry, ExportResult, ExportScope};
+use crate::export::utils::calculate_file_checksum;
 use anyhow::{Context, Result};
 use csv::Writer;
 use std::fs::File;
@@ -68,16 +69,45 @@ impl CsvExporter {
 
         // Flush writer
         writer.flush()?;
+        drop(writer); // Close file before calculating checksum
+
+        // CRITICAL FIX: Calculate checksum on content ONLY (before appending checksum lines)
+        // This allows verification to recalculate by excluding checksum comment lines
+        let checksum = calculate_file_checksum(save_path)
+            .with_context(|| format!(
+                "Failed to calculate checksum for {}. Check file permissions and disk space.",
+                save_path.display()
+            ))?;
+
+        // Now append checksum and row count to file (NOT included in checksum)
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(save_path)?;
+        writeln!(file, "# Export SHA-256: {}", checksum)?;
+        writeln!(file, "# Row Count Verification: {} entries written", entries.len())?;
+        file.flush()?;
 
         // Calculate duration and file size
         let duration = start.elapsed();
         let file_size = std::fs::metadata(save_path)?.len();
+
+        // Verify entry count matches
+        let verification_passed = entries.len() == self.metadata.total_entries;
+        if !verification_passed {
+            tracing::warn!(
+                "Row count mismatch: wrote {} entries but metadata says {}",
+                entries.len(),
+                self.metadata.total_entries
+            );
+        }
 
         Ok(ExportResult {
             file_path: save_path.to_path_buf(),
             entries_written: entries.len(),
             duration_seconds: duration.as_secs_f64(),
             file_size_bytes: file_size,
+            checksum,
+            verification_passed,
         })
     }
 
@@ -155,16 +185,44 @@ impl CsvExporter {
 
         // Final flush
         writer.flush()?;
+        drop(writer); // Close file before calculating checksum
+
+        // CRITICAL FIX: Calculate checksum on content ONLY (before appending checksum lines)
+        let checksum = calculate_file_checksum(save_path)
+            .with_context(|| format!(
+                "Failed to calculate checksum for {}. Check file permissions and disk space.",
+                save_path.display()
+            ))?;
+
+        // Now append checksum and row count to file (NOT included in checksum)
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(save_path)?;
+        writeln!(file, "# Export SHA-256: {}", checksum)?;
+        writeln!(file, "# Row Count Verification: {} entries written", entries_written)?;
+        file.flush()?;
 
         // Calculate duration and file size
         let duration = start.elapsed();
         let file_size = std::fs::metadata(save_path)?.len();
+
+        // Verify entry count matches
+        let verification_passed = entries_written == total_entries;
+        if !verification_passed {
+            tracing::warn!(
+                "Row count mismatch: wrote {} entries but expected {}",
+                entries_written,
+                total_entries
+            );
+        }
 
         Ok(ExportResult {
             file_path: save_path.to_path_buf(),
             entries_written,
             duration_seconds: duration.as_secs_f64(),
             file_size_bytes: file_size,
+            checksum,
+            verification_passed,
         })
     }
 

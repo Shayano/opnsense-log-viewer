@@ -1,4 +1,7 @@
-use crate::export::types::{ExportMetadata, ExportLogEntry, ExportResult};
+use crate::export::types::{
+    ExportChecksum, ExportMetadata, ExportLogEntry, ExportResult, ExportVerification,
+};
+use crate::export::utils::calculate_file_checksum;
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::fs::File;
@@ -36,29 +39,75 @@ impl JsonExporter {
         let start = Instant::now();
         let save_path = save_path.as_ref();
 
-        // Build JSON document
+        // Build JSON document (with placeholder metadata - will update after checksum)
         let entries_count = entries.len();
+        let mut metadata = self.metadata.clone();
+
+        // Add verification info
+        metadata.verification = Some(ExportVerification {
+            entries_written: entries_count,
+            export_complete: true,
+        });
+
         let document = JsonExportDocument {
-            metadata: self.metadata.clone(),
+            metadata: metadata.clone(),
             entries,
         };
 
-        // Write to file with pretty-print (2-space indent)
-        let file = File::create(save_path)
-            .context("Failed to create JSON file")?;
+        // CRITICAL FIX: Calculate checksum on JSON WITHOUT exportChecksum field first
+        // This allows verification to recalculate by removing exportChecksum temporarily
 
-        serde_json::to_writer_pretty(file, &document)
-            .context("Failed to write JSON")?;
+        // Serialize to string to calculate checksum
+        let json_without_checksum = serde_json::to_string_pretty(&document)
+            .context("Failed to serialize JSON for checksum")?;
+
+        // Calculate checksum on content without exportChecksum
+        let checksum = {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(json_without_checksum.as_bytes());
+            format!("{:x}", hasher.finalize())
+        };
+
+        // Now add checksum to metadata
+        metadata.export_checksum = Some(ExportChecksum {
+            algorithm: "SHA-256".to_string(),
+            hash: checksum.clone(),
+        });
+
+        let document_with_checksum = JsonExportDocument {
+            metadata,
+            entries: document.entries,
+        };
+
+        // Write final file WITH checksum
+        let file = File::create(save_path)
+            .context("Failed to create JSON file with checksum")?;
+
+        serde_json::to_writer_pretty(file, &document_with_checksum)
+            .context("Failed to write JSON with checksum")?;
 
         // Calculate duration and file size
         let duration = start.elapsed();
         let file_size = std::fs::metadata(save_path)?.len();
+
+        // Verify entry count matches
+        let verification_passed = entries_count == self.metadata.total_entries;
+        if !verification_passed {
+            tracing::warn!(
+                "Row count mismatch: wrote {} entries but metadata says {}",
+                entries_count,
+                self.metadata.total_entries
+            );
+        }
 
         Ok(ExportResult {
             file_path: save_path.to_path_buf(),
             entries_written: entries_count,
             duration_seconds: duration.as_secs_f64(),
             file_size_bytes: file_size,
+            checksum,
+            verification_passed,
         })
     }
 
@@ -143,16 +192,64 @@ impl JsonExporter {
 
         // Final flush
         writer.flush()?;
+        drop(writer); // Close file before checksum calculation
+
+        // CRITICAL FIX: Calculate checksum WITHOUT exportChecksum/verification fields
+        // Read file and calculate checksum on current content (metadata without checksum)
+        let checksum = calculate_file_checksum(save_path)
+            .with_context(|| format!(
+                "Failed to calculate checksum for {}. Check file permissions and disk space.",
+                save_path.display()
+            ))?;
+
+        // Now update metadata with checksum and verification
+        // MEMORY CONCERN: This reads entire file into memory for large exports
+        // Trade-off: Correctness > Memory for this one-time operation
+        // Alternative would be: streaming JSON parser/updater (complex, out of scope)
+        let file_content = std::fs::read_to_string(save_path)
+            .context("Failed to read file for metadata update")?;
+        let mut json_value: serde_json::Value = serde_json::from_str(&file_content)
+            .context("Failed to parse JSON for metadata update")?;
+
+        // Update metadata with checksum and verification
+        if let Some(metadata) = json_value.get_mut("metadata") {
+            metadata["exportChecksum"] = serde_json::json!({
+                "algorithm": "SHA-256",
+                "hash": checksum
+            });
+            metadata["verification"] = serde_json::json!({
+                "entriesWritten": entries_written,
+                "exportComplete": true
+            });
+        }
+
+        // Rewrite file with updated metadata
+        let file = File::create(save_path)
+            .context("Failed to rewrite JSON file with checksum")?;
+        serde_json::to_writer_pretty(file, &json_value)
+            .context("Failed to write JSON with checksum")?;
 
         // Calculate duration and file size
         let duration = start.elapsed();
         let file_size = std::fs::metadata(save_path)?.len();
+
+        // Verify entry count matches
+        let verification_passed = entries_written == total_entries;
+        if !verification_passed {
+            tracing::warn!(
+                "Row count mismatch: wrote {} entries but expected {}",
+                entries_written,
+                total_entries
+            );
+        }
 
         Ok(ExportResult {
             file_path: save_path.to_path_buf(),
             entries_written,
             duration_seconds: duration.as_secs_f64(),
             file_size_bytes: file_size,
+            checksum,
+            verification_passed,
         })
     }
 }
