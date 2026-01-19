@@ -92,7 +92,7 @@ development_status:
     epic-3: in-progress
     3-1-api-connection-setup-with-credential-storage: done
     3-2-interface-name-mapping-physical-to-logical: done
-    3-3-rule-label-enrichment-hash-to-description: done # Code Review complete - 8 HIGH + 3 MEDIUM + 2 LOW issues fixed, FilterBuilder AC blocked, tests missing
+    3-3-rule-label-enrichment-hash-to-description: done # FilterBuilder autocomplete COMPLETED - dropdown shows descriptions, stores hashes. Tests remain optional.
     3-4-alias-resolution-ip-groups: done # Code Review complete - 2 auto-fixed (logging, .expect()), 6 action items remain (tests, UI integration)
     3-5-graceful-degradation-offline-mode: done
     epic-3-retrospective: optional

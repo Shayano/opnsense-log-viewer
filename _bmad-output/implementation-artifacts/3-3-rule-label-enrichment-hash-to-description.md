@@ -142,12 +142,12 @@ So that I can instantly understand why traffic was blocked or passed without loo
   - [ ] Debounce to avoid excessive API calls (500ms delay)
   - [ ] Show "Enriching rules..." indicator in status bar
 
-- [ ] Update FilterBuilder rule label field (AC: Filter builder integration) [BLOCKED - NOT IMPLEMENTED]
-  - [ ] In src/components/filter-builder/value-input.tsx
-  - [ ] When field = "rule_label", show autocomplete dropdown
-  - [ ] Populate with cached rule labels (descriptions)
-  - [ ] Support filtering by description OR hash
-  - [ ] Store hash in filter value (for backend query compatibility)
+- [x] Update FilterBuilder rule label field (AC: Filter builder integration) [COMPLETED]
+  - [x] In src/components/filter-builder/value-input.tsx
+  - [x] When field = "rule_label", show autocomplete dropdown
+  - [x] Populate with cached rule labels (descriptions)
+  - [x] Support filtering by description OR hash
+  - [x] Store hash in filter value (for backend query compatibility)
 
 - [x] Add progress indicator for rule enrichment (AC: UI feedback) [PARTIAL - No live progress updates]
   - [x] In status bar or notification area (using toast)
@@ -1470,7 +1470,7 @@ N/A - Story created via create-story workflow (2026-01-18)
 - ✅ **8 HIGH issues fixed** (batch concurrency limiting, error handling, field name compatibility, .json() API)
 - ✅ **3 MEDIUM issues fixed** (enhanced error messages)
 - ✅ **2 LOW issues fixed** (magic number constant, tracing usage)
-- ⚠️ **1 AC blocked:** FilterBuilder autocomplete (story task unmarked as incomplete)
+- ✅ **FilterBuilder autocomplete:** COMPLETED - dropdown shows descriptions, stores hashes
 - ⚠️ **1 AC partial:** Progress indicator shows "0 of X" only (no live updates during batch)
 - ⚠️ **Tests missing:** 0% frontend test coverage, backend tests stubbed only
 
@@ -1486,7 +1486,7 @@ N/A - Story created via create-story workflow (2026-01-18)
 9. ✅ Extend enrichment-store.ts with rule labels state
 10. ✅ Update log-table-row.tsx to display rule labels
 11. ✅ Update log-table.tsx to auto-enrich on load [FIXED: Magic number extracted]
-12. ❌ Update value-input.tsx for rule label autocomplete [BLOCKED: Not implemented]
+12. ✅ Update value-input.tsx for rule label autocomplete [COMPLETED]
 13. ✅ Add auto-load in App.tsx
 14. ❌ Write comprehensive backend unit tests (85%+ coverage) [BLOCKED: Stubs only, 0% real coverage]
 15. ❌ Write comprehensive frontend unit tests (80%+ coverage) [BLOCKED: No test files created]
