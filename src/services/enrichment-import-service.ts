@@ -97,6 +97,36 @@ export async function importEnrichmentData(): Promise<boolean> {
       deviceId: result.deviceId,
     });
 
+    // Step 5b: Reload all enrichment data from backend cache to frontend store
+    console.log('[Import] Reloading enrichment data into frontend store');
+    try {
+      // Reload interface mappings
+      const interfaceMappings = await invoke<any>('get_interface_mappings_cmd');
+      if (interfaceMappings) {
+        store.setInterfaceMappings(interfaceMappings);
+        console.log('[Import] Interface mappings reloaded:', interfaceMappings.mappings);
+      }
+
+      // Reload rule labels
+      const ruleLabels = await invoke<Record<string, string>>('get_rule_labels');
+      if (ruleLabels) {
+        store.setRuleLabels(new Map(Object.entries(ruleLabels)));
+        console.log('[Import] Rule labels reloaded:', Object.keys(ruleLabels).length, 'rules');
+      }
+
+      // Reload aliases
+      const aliases = await invoke<Record<string, any>>('get_aliases');
+      if (aliases) {
+        // Convert aliases to Map format expected by store
+        const aliasesMap = new Map(Object.entries(aliases));
+        store.setAliases(aliasesMap);
+        console.log('[Import] Aliases reloaded:', Object.keys(aliases).length, 'aliases');
+      }
+    } catch (error) {
+      console.warn('[Import] Failed to reload some enrichment data:', error);
+      // Don't fail the import if reload fails - data is already in backend cache
+    }
+
     // Step 6: Show success notification
     toast.success(
       `Backup enrichment loaded successfully\n${result.interfacesImported} interfaces, ${result.rulesImported} rules, ${result.aliasesImported} aliases`,

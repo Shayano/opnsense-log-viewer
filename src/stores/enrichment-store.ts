@@ -14,7 +14,7 @@ interface AliasMapping {
 }
 
 // Story 3.5: Connection status types
-type ConnectionStatus = 'connected' | 'disconnected' | 'degraded';
+type ConnectionStatus = 'connected' | 'disconnected' | 'degraded' | 'backup_enrichment';
 
 interface ConnectionInfo {
   status: ConnectionStatus;
@@ -245,7 +245,7 @@ export const useEnrichmentStore = create<EnrichmentStore>((set, get) => ({
     set({
       backupEnrichmentActive: true,
       backupMetadata: metadata,
-      connectionStatus: 'disconnected', // Update connection status to reflect backup mode
+      connectionStatus: 'backup_enrichment', // Update connection status to reflect backup mode
     });
   },
 

@@ -23,6 +23,9 @@ pub enum ConnectionStatus {
     Disconnected,
     /// API partially working (some calls timing out)
     Degraded,
+    /// Using imported backup enrichment data (Story 4.2)
+    #[serde(rename = "backup_enrichment")]
+    BackupEnrichment,
 }
 
 /// Connection status with metadata
