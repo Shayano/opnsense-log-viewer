@@ -5,6 +5,57 @@ import toast from 'react-hot-toast';
 import type { Filter, FilterState, SavedFilter } from '@/types/filter';
 
 const MAX_SAVED_FILTERS = 20;
+const CURRENT_VERSION = 1;
+
+// Persisted state structure with versioning
+interface PersistedState {
+  version?: number;
+  savedFilters: SavedFilter[];
+}
+
+/**
+ * Migrate saved filter data from older versions to current version
+ * This ensures backward compatibility when the SavedFilter structure changes
+ */
+function migrateFilterData(persistedState: any): PersistedState {
+  // If no persisted state, return empty state with current version
+  if (!persistedState) {
+    return {
+      version: CURRENT_VERSION,
+      savedFilters: [],
+    };
+  }
+
+  // Get version (default to 0 if not present - initial format)
+  const version = persistedState.version ?? 0;
+
+  // If already at current version, return as-is
+  if (version >= CURRENT_VERSION) {
+    return persistedState as PersistedState;
+  }
+
+  // Migration chain: apply all migrations from old version to current
+  let migrated = { ...persistedState };
+
+  // Migration v0 -> v1: Add version field to each saved filter
+  if (version < 1) {
+    console.log('[Migration] Migrating filter data from v0 to v1');
+    migrated = {
+      version: 1,
+      savedFilters: (migrated.savedFilters || []).map((sf: any) => ({
+        ...sf,
+        version: 1, // Add version field to each filter
+      })),
+    };
+  }
+
+  // Future migrations can be added here:
+  // if (version < 2) { ... }
+  // if (version < 3) { ... }
+
+  console.log(`[Migration] Migration complete: v${version} -> v${CURRENT_VERSION}`);
+  return migrated as PersistedState;
+}
 
 // Custom storage with error handling for quota exceeded
 const createCustomStorage = (): StateStorage => ({
@@ -94,6 +145,7 @@ export const useFilterStore = create<FilterState>()(
             name,
             filters: state.filters.map(({ id, ...filter }) => filter),
             timestamp: Date.now(),
+            version: CURRENT_VERSION, // Add version for future migrations
           };
 
           let updatedSavedFilters = [...state.savedFilters, savedFilter];
@@ -107,9 +159,10 @@ export const useFilterStore = create<FilterState>()(
             updatedSavedFilters = updatedSavedFilters.slice(1);
 
             // Notify user about FIFO eviction (check if toast is available - tests may not have it)
-            if (typeof toast?.warning === 'function') {
-              toast.warning(`Removed oldest filter "${removedFilter.name}" to make room`, {
+            if (typeof toast === 'function') {
+              toast(`Removed oldest filter "${removedFilter.name}" to make room`, {
                 duration: 4000,
+                icon: '⚠️',
               });
             }
           }
@@ -144,8 +197,19 @@ export const useFilterStore = create<FilterState>()(
     {
       name: 'opnsense-log-viewer-filters', // localStorage key
       storage: createJSONStorage(() => createCustomStorage()),
+      version: CURRENT_VERSION,
+      migrate: (persistedState: any, _version: number) => {
+        // Migrate old data format to current version
+        const migrated = migrateFilterData(persistedState);
+        // Return only the FilterState properties (Zustand expects this shape)
+        return {
+          savedFilters: migrated.savedFilters,
+        };
+      },
       partialize: (state) => ({
         // Only persist saved filters (not active filters or draft mode)
+        // Include version for migration tracking
+        version: CURRENT_VERSION,
         savedFilters: state.savedFilters,
       }),
     }

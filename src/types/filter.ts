@@ -44,6 +44,7 @@ export interface SavedFilter {
   name: string;                        // User-provided name (e.g., "Nightly Port 443 Blocks")
   filters: Omit<Filter, 'id'>[];      // Filter configurations (without runtime IDs)
   timestamp: number;                   // Creation timestamp (for FIFO eviction)
+  version?: number;                    // Data format version (for migration) - optional for backward compatibility
 }
 
 export interface FilterState {
