@@ -1528,19 +1528,19 @@ Story 4.2 implementation COMPLETE. Successfully implemented enrichment data impo
 
 #### **CRITICAL (2)**
 
-6. **🔴 Connection Status Type Mismatch**
-   - **Location**: Backend types.rs vs Story documentation
-   - **Issue**: Story claims BackupEnrichment variant added, but types.rs:17-26 only has Connected, Disconnected, Degraded
-   - **Impact**: Type system doesn't model backup enrichment state
-   - **Recommendation**: Add BackupEnrichment variant OR update story docs to reflect using "disconnected" status
-   - **Action**: Architecture decision needed
+6. **✅ Connection Status Type Mismatch** [FIXED]
+   - **Location**: Backend types.rs + frontend enrichment-store.ts
+   - **Issue**: Story claims BackupEnrichment variant added, but types.rs:17-26 only had Connected, Disconnected, Degraded
+   - **Impact**: Type system didn't model backup enrichment state
+   - **Fix Applied**: Added BackupEnrichment variant to ConnectionStatus enum, updated frontend to use 'backup_enrichment' status
+   - **Status**: RESOLVED
 
-7. **🔴 No enrichment cache update after import in offline banner**
-   - **Location**: offline-banner.tsx:43-55
-   - **Issue**: Frontend may not re-render after backend cache update
-   - **Impact**: UI may not immediately reflect imported data
-   - **Recommendation**: Trigger store refresh OR emit backend event for cache updates
-   - **Action**: Integration testing needed
+7. **✅ No enrichment cache update after import in offline banner** [FIXED]
+   - **Location**: enrichment-import-service.ts
+   - **Issue**: Frontend didn't re-render after backend cache update
+   - **Impact**: UI didn't immediately reflect imported data
+   - **Fix Applied**: Added reload of interface mappings, rule labels, and aliases after import
+   - **Status**: RESOLVED
 
 #### **MEDIUM (3)**
 
