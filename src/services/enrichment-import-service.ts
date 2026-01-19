@@ -110,16 +110,14 @@ export async function importEnrichmentData(): Promise<boolean> {
       // Reload rule labels
       const ruleLabels = await invoke<Record<string, string>>('get_rule_labels');
       if (ruleLabels) {
-        store.setRuleLabels(new Map(Object.entries(ruleLabels)));
+        store.setRuleLabels(ruleLabels);
         console.log('[Import] Rule labels reloaded:', Object.keys(ruleLabels).length, 'rules');
       }
 
       // Reload aliases
       const aliases = await invoke<Record<string, any>>('get_aliases');
       if (aliases) {
-        // Convert aliases to Map format expected by store
-        const aliasesMap = new Map(Object.entries(aliases));
-        store.setAliases(aliasesMap);
+        store.setAliases(aliases);
         console.log('[Import] Aliases reloaded:', Object.keys(aliases).length, 'aliases');
       }
     } catch (error) {
