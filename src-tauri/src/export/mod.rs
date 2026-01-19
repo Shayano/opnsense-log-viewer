@@ -2,10 +2,12 @@ pub mod types;
 pub mod csv;
 pub mod json;
 pub mod commands;
+pub mod utils;
 
 // Re-export commonly used types
 pub use types::{
-    ExportFormat, ExportLogEntry, ExportMetadata, ExportProgress, ExportRequest, ExportResult,
+    ExportFormat, ExportScope, ExportLogEntry, ExportMetadata, ExportProgress, ExportRequest,
+    ExportResult, ExportEstimate, InsufficientDiskSpaceError,
     FilterInfo, SourceFileInfo, EnrichmentInfo,
 };
 

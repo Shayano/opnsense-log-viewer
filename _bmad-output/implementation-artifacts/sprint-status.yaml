@@ -103,6 +103,6 @@ development_status:
     epic-4-retrospective: optional
     epic-5: in-progress
     5-1-filtered-result-export-csv-json-with-metadata: done
-    5-2-full-dataset-export-with-streaming: backlog
+    5-2-full-dataset-export-with-streaming: done # Code Review complete - 7 issues auto-fixed (4 HIGH, 2 MEDIUM, 1 LOW), backend streaming complete, frontend NOT implemented
     5-3-export-integrity-verification: backlog
     epic-5-retrospective: optional

@@ -46,6 +46,7 @@ argon2 = "0.5"
 machine-uid = "0.5"
 anyhow = "1"
 dirs = "5.0"
+fs2 = "0.4" # Disk space checking for export
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

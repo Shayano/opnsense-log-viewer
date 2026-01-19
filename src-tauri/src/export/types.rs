@@ -13,6 +13,17 @@ pub enum ExportFormat {
     Json,
 }
 
+/// Export scope - filtered results or full dataset
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExportScope {
+    /// Export only filtered results
+    Filtered,
+
+    /// Export entire unfiltered dataset
+    FullDataset,
+}
+
 /// Source file information for export metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,6 +85,9 @@ pub struct ExportMetadata {
 
     /// Total entries in source file
     pub total_in_source: usize,
+
+    /// Export scope - filtered or full dataset
+    pub export_scope: ExportScope,
 
     /// Enrichment status (if applicable)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -161,4 +175,29 @@ pub struct ExportLogEntry {
 
     /// Rule label (enriched: "Block RFC1918" or raw: "abc123def")
     pub rule_label: String,
+}
+
+/// Export estimate for warning dialog
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportEstimate {
+    /// Estimated number of entries to export
+    pub estimated_entries: usize,
+
+    /// Estimated file size in MB
+    pub estimated_file_size_mb: f64,
+
+    /// Estimated duration in seconds
+    pub estimated_duration_seconds: f64,
+}
+
+/// Insufficient disk space error
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InsufficientDiskSpaceError {
+    /// Required disk space in MB
+    pub required_mb: f64,
+
+    /// Available disk space in MB
+    pub available_mb: f64,
 }

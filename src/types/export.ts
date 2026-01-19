@@ -1,6 +1,8 @@
 // Export types for Story 5.1: Filtered Result Export
+// Story 5.2: Full Dataset Export with Streaming
 
 export type ExportFormat = 'csv' | 'json';
+export type ExportScope = 'filtered' | 'fullDataset';
 
 export interface SourceFileInfo {
   path: string;
@@ -26,6 +28,7 @@ export interface ExportMetadata {
   filtersApplied: FilterInfo[];
   totalEntries: number;
   totalInSource: number;
+  exportScope: ExportScope;
   enrichmentStatus?: EnrichmentInfo;
 }
 
@@ -66,5 +69,24 @@ export interface ExportDialogProps {
 export interface ExportProgressModalProps {
   isOpen: boolean;
   progress: ExportProgress | null;
+  onCancel: () => void;
+}
+
+// Story 5.2: Export estimation types
+export interface ExportEstimate {
+  estimatedEntries: number;
+  estimatedFileSizeMb: number;
+  estimatedDurationSeconds: number;
+}
+
+export interface InsufficientDiskSpaceError {
+  requiredMb: number;
+  availableMb: number;
+}
+
+export interface ExportWarningModalProps {
+  isOpen: boolean;
+  estimate: ExportEstimate | null;
+  onContinue: () => void;
   onCancel: () => void;
 }

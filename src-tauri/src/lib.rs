@@ -114,6 +114,8 @@ pub fn run() {
             export::commands::export_filtered_results,
             export::commands::cancel_export,
             export::commands::open_export_location,
+            // Story 5.2: Full Dataset Export with Streaming
+            export::commands::estimate_export,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
