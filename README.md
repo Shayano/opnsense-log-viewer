@@ -12,6 +12,20 @@ High-performance desktop application for investigating OPNsense firewall logs (3
 - **Modern UI**: VS Code-inspired layout with dark/light themes
 - **Cross-Platform**: Windows, macOS, and Linux support
 
+## Installation
+
+### Download Pre-Built Binaries (Recommended)
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/yourusername/opnsense-log-viewer/releases):
+
+- **Windows**: Download `.msi` or `.exe` installer
+- **macOS**: Download `.dmg` disk image
+- **Linux**: Download `.AppImage`, `.deb`, or `.rpm` package
+
+### Build from Source
+
+If you prefer to build from source, see the [Development](#development) section below.
+
 ## Tech Stack
 
 - **Backend**: Tauri v2 + Rust 1.70+
@@ -22,7 +36,7 @@ High-performance desktop application for investigating OPNsense firewall logs (3
 - **Icons**: lucide-react
 - **Notifications**: react-hot-toast 2.4
 
-## Quick Start
+## Development
 
 ### Prerequisites
 
@@ -48,10 +62,39 @@ npm run tauri dev
 ### Build for Production
 
 ```bash
-npm run tauri build
+npm run build:release
 ```
 
-The build will create platform-specific installers in `src-tauri/target/release/bundle/`.
+This command:
+1. Compiles the TypeScript frontend
+2. Bundles the React app with Vite
+3. Builds the Rust backend in release mode
+4. Creates platform-specific installers in `src-tauri/target/release/bundle/`
+
+**Installers Generated**:
+- **Windows**: `.msi` and `.exe` in `bundle/msi/` and `bundle/nsis/`
+- **macOS**: `.dmg` and `.app` in `bundle/dmg/` and `bundle/macos/`
+- **Linux**: `.AppImage`, `.deb`, and `.rpm` in `bundle/appimage/`, `bundle/deb/`, and `bundle/rpm/`
+
+### Creating Releases
+
+The project uses GitHub Actions to automatically build and publish releases. To create a new release:
+
+```bash
+# Update version in package.json and src-tauri/tauri.conf.json
+# Commit your changes
+git add .
+git commit -m "chore: bump version to v0.2.0"
+
+# Create and push a tag
+git tag v0.2.0
+git push --tags
+```
+
+GitHub Actions will automatically:
+1. Build installers for Windows, macOS, and Linux
+2. Create a GitHub Release with auto-generated release notes
+3. Upload all installers as downloadable assets
 
 ## Development Commands
 
@@ -278,22 +321,6 @@ npm run tauri dev
 ```
 
 The showcase demonstrates all base components in both light and dark themes with interactive examples.
-
-## Development Status
-
-**Current Story**: Epic 0, Story 0.3 - Tailwind CSS & Design System Foundation ✅ Complete
-
-**Completed**:
-- ✅ Story 0.1: Project Scaffolding with Tauri + React
-- ✅ Story 0.2: Comprehensive Test Infrastructure
-- ✅ Story 0.3: Tailwind CSS & Design System Foundation
-
-**Next Steps**:
-- Epic 1: Core Log Investigation Capability
-- Story 1.1: File Selection with Native OS Picker
-- Story 1.2: Multi-Format Log Parser
-
-See `_bmad-output/implementation-artifacts/sprint-status.yaml` for full project status.
 
 ## Performance Targets
 
