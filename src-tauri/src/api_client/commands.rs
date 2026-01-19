@@ -1,7 +1,7 @@
 use tauri::{command, AppHandle, Emitter, State};
-use crate::api_client::types::{AliasMapping, ApiCredentials, CacheStatus, ConnectionInfo, ConnectionStatus, ConnectionTestResult, ExportedEnrichmentData, ExportMetadata, ExportResult, InterfaceMappingCache};
+use crate::api_client::types::{AliasMapping, ApiCredentials, CacheStatus, ConnectionInfo, ConnectionStatus, ConnectionTestResult, ExportedEnrichmentData, ExportMetadata, ExportResult, ImportResult, ImportValidation, InterfaceMappingCache};
 use crate::api_client::client::test_connection;
-use crate::api_client::enrichment::{calculate_config_hash, fetch_aliases_batch, fetch_interface_mappings, fetch_opnsense_version, fetch_rule_labels_batch};
+use crate::api_client::enrichment::{calculate_config_hash, calculate_enrichment_age, fetch_aliases_batch, fetch_interface_mappings, fetch_opnsense_version, fetch_rule_labels_batch, ENRICHMENT_STALENESS_THRESHOLD_DAYS};
 use crate::credentials::{manager, encrypted_storage};
 use crate::state::EnrichmentCacheState;
 use log::{info, warn};
@@ -677,5 +677,293 @@ mod export_tests {
         // Test that open_folder uses correct command for Linux
         let test_path = "/home/test/file.json";
         assert!(test_path.starts_with("/"));
+    }
+}
+
+// ============================================================================
+// Enrichment Import Commands (Story 4.2)
+// ============================================================================
+
+/// Validate enrichment JSON file before import
+///
+/// Checks:
+/// - JSON syntax validity
+/// - Required fields present (metadata, interfaces, rule_labels, aliases)
+/// - Metadata fields present (export_timestamp, device_id, config_hash)
+/// - Calculates enrichment age (days since export)
+/// - Determines if stale (>7 days)
+#[command]
+pub fn validate_enrichment_import(file_path: String) -> Result<ImportValidation, String> {
+    info!("Validating enrichment import: {}", file_path);
+
+    // Read file contents
+    let file_contents = std::fs::read_to_string(&file_path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    // Parse JSON
+    let export_data: ExportedEnrichmentData = match serde_json::from_str(&file_contents) {
+        Ok(data) => data,
+        Err(e) => {
+            return Ok(ImportValidation {
+                is_valid: false,
+                error_message: Some(format!("Invalid JSON format: {}", e)),
+                missing_fields: None,
+                age_days: None,
+                is_stale: false,
+                metadata: None,
+            });
+        }
+    };
+
+    // Validate required metadata fields
+    let mut missing_fields = Vec::new();
+
+    // Validate export_timestamp is present (DateTime<Utc> is always valid if parsed, but check it's not default/zero)
+    if export_data.metadata.export_timestamp.timestamp() == 0 {
+        missing_fields.push("metadata.exportTimestamp".to_string());
+    }
+    if export_data.metadata.device_id.is_empty() {
+        missing_fields.push("metadata.deviceId".to_string());
+    }
+    if export_data.metadata.config_hash.is_empty() {
+        missing_fields.push("metadata.configHash".to_string());
+    }
+
+    if !missing_fields.is_empty() {
+        return Ok(ImportValidation {
+            is_valid: false,
+            error_message: Some("Missing required metadata fields".to_string()),
+            missing_fields: Some(missing_fields),
+            age_days: None,
+            is_stale: false,
+            metadata: None,
+        });
+    }
+
+    // Calculate enrichment age
+    let age_days = calculate_enrichment_age(&export_data.metadata.export_timestamp)
+        .map_err(|e| format!("Failed to calculate enrichment age: {}", e))?;
+
+    let is_stale = age_days > ENRICHMENT_STALENESS_THRESHOLD_DAYS;
+
+    info!(
+        "Validation passed: {} interfaces, {} rules, {} aliases, {} days old",
+        export_data.interfaces.len(),
+        export_data.rule_labels.len(),
+        export_data.aliases.len(),
+        age_days
+    );
+
+    Ok(ImportValidation {
+        is_valid: true,
+        error_message: None,
+        missing_fields: None,
+        age_days: Some(age_days),
+        is_stale,
+        metadata: Some(export_data.metadata),
+    })
+}
+
+/// Import enrichment data from JSON file
+///
+/// Steps:
+/// 1. Validates file first (fail fast if invalid)
+/// 2. Parses ExportedEnrichmentData
+/// 3. Transforms alias data format (alias_name → IPs to IP → aliases)
+/// 4. Updates enrichment cache with imported data
+/// 5. Returns ImportResult with counts
+///
+/// On error: Preserves current state (no partial updates)
+#[command]
+pub async fn import_enrichment_data(
+    file_path: String,
+    cache_state: State<'_, EnrichmentCacheState>,
+) -> Result<ImportResult, String> {
+    info!("Importing enrichment data from: {}", file_path);
+
+    // Validate first (fail fast if invalid)
+    let validation = validate_enrichment_import(file_path.clone())?;
+    if !validation.is_valid {
+        return Err(validation.error_message.unwrap_or_else(|| "Validation failed".to_string()));
+    }
+
+    // Read and parse file
+    let file_contents = std::fs::read_to_string(&file_path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let export_data: ExportedEnrichmentData = serde_json::from_str(&file_contents)
+        .map_err(|e| format!("Failed to parse JSON: {}", e))?;
+
+    // Transform aliases: HashMap<alias_name, Vec<IP>> → HashMap<IP, Vec<AliasMapping>>
+    let aliases_for_cache = transform_aliases_for_import(&export_data.aliases);
+
+    // Update cache state with imported data
+    cache_state.set_interface_mappings(export_data.interfaces.clone(), export_data.metadata.device_id.clone());
+    cache_state.set_rule_labels(export_data.rule_labels.clone(), export_data.metadata.device_id.clone());
+    cache_state.set_aliases(aliases_for_cache, export_data.metadata.device_id.clone());
+
+    // Update connection status to disconnected (backup enrichment mode)
+    // Note: Frontend will handle backup enrichment UI state
+    cache_state.set_connection_status(ConnectionStatus::Disconnected, Some("Using backup enrichment".to_string()));
+
+    let age_days = validation.age_days.unwrap_or(0);
+
+    info!(
+        "Import complete: {} interfaces, {} rules, {} aliases",
+        export_data.interfaces.len(),
+        export_data.rule_labels.len(),
+        export_data.aliases.len()
+    );
+
+    Ok(ImportResult {
+        interfaces_imported: export_data.interfaces.len(),
+        rules_imported: export_data.rule_labels.len(),
+        aliases_imported: export_data.aliases.len(),
+        export_timestamp: export_data.metadata.export_timestamp,
+        device_id: export_data.metadata.device_id,
+        age_days,
+    })
+}
+
+/// Transform aliases from export format to cache format
+///
+/// Export format: HashMap<alias_name, Vec<IP>>
+/// Cache format: HashMap<IP, Vec<AliasMapping>>
+///
+/// Example:
+/// Input: {"Servers": ["192.168.1.100", "192.168.1.101"], "DMZ": ["10.0.1.5"]}
+/// Output: {
+///   "192.168.1.100": [AliasMapping { alias_name: "Servers", group_members: [...] }],
+///   "192.168.1.101": [AliasMapping { alias_name: "Servers", group_members: [...] }],
+///   "10.0.1.5": [AliasMapping { alias_name: "DMZ", group_members: [...] }]
+/// }
+fn transform_aliases_for_import(
+    aliases_export: &HashMap<String, Vec<String>>
+) -> HashMap<String, Vec<AliasMapping>> {
+    let mut aliases_cache: HashMap<String, Vec<AliasMapping>> = HashMap::new();
+
+    for (alias_name, ips) in aliases_export {
+        for ip in ips {
+            let mapping = AliasMapping {
+                alias_name: alias_name.clone(),
+                group_members: ips.clone(),
+                description: None,
+                alias_type: None,
+            };
+
+            aliases_cache
+                .entry(ip.clone())
+                .or_insert_with(Vec::new)
+                .push(mapping);
+        }
+    }
+
+    aliases_cache
+}
+
+/// Open file picker dialog for enrichment import
+///
+/// Returns:
+/// - Some(file_path) if user selects a file
+/// - None if user cancels dialog
+#[command]
+pub async fn open_enrichment_file_picker() -> Result<Option<String>, String> {
+    use tauri::api::dialog::blocking::FileDialogBuilder;
+
+    info!("Opening file picker for enrichment import");
+
+    // Get Downloads directory (default location)
+    let downloads_dir = dirs::download_dir()
+        .or_else(|| dirs::home_dir())
+        .ok_or("Failed to determine download directory")?;
+
+    // Open file picker dialog
+    let file_path = FileDialogBuilder::new()
+        .set_directory(&downloads_dir)
+        .add_filter("Enrichment Files", &["json"])
+        .pick_file();
+
+    match file_path {
+        Some(path) => Ok(Some(path.to_string_lossy().to_string())),
+        None => Ok(None), // User cancelled
+    }
+}
+
+#[cfg(test)]
+mod import_tests {
+    use super::*;
+
+    #[test]
+    fn test_transform_aliases_for_import() {
+        let mut aliases_export = HashMap::new();
+        aliases_export.insert(
+            "Servers_Group".to_string(),
+            vec!["192.168.1.100".to_string(), "192.168.1.101".to_string()]
+        );
+        aliases_export.insert(
+            "DMZ_Hosts".to_string(),
+            vec!["10.0.1.5".to_string()]
+        );
+
+        let aliases_cache = transform_aliases_for_import(&aliases_export);
+
+        // Verify IP → aliases mapping
+        assert!(aliases_cache.contains_key("192.168.1.100"));
+        assert!(aliases_cache.contains_key("192.168.1.101"));
+        assert!(aliases_cache.contains_key("10.0.1.5"));
+
+        // Verify aliases for specific IP
+        let ip_100_aliases = &aliases_cache["192.168.1.100"];
+        assert_eq!(ip_100_aliases.len(), 1);
+        assert_eq!(ip_100_aliases[0].alias_name, "Servers_Group");
+        assert_eq!(ip_100_aliases[0].group_members, vec!["192.168.1.100", "192.168.1.101"]);
+    }
+
+    #[test]
+    fn test_transform_aliases_for_import_empty() {
+        let aliases_export = HashMap::new();
+        let aliases_cache = transform_aliases_for_import(&aliases_export);
+        assert!(aliases_cache.is_empty());
+    }
+
+    #[test]
+    fn test_transform_aliases_for_import_single_ip() {
+        let mut aliases_export = HashMap::new();
+        aliases_export.insert(
+            "WebServer".to_string(),
+            vec!["192.168.1.50".to_string()]
+        );
+
+        let aliases_cache = transform_aliases_for_import(&aliases_export);
+
+        assert_eq!(aliases_cache.len(), 1);
+        assert!(aliases_cache.contains_key("192.168.1.50"));
+        let aliases = &aliases_cache["192.168.1.50"];
+        assert_eq!(aliases.len(), 1);
+        assert_eq!(aliases[0].alias_name, "WebServer");
+    }
+
+    #[test]
+    fn test_transform_aliases_for_import_multiple_aliases_same_ip() {
+        // Edge case: Same IP appears in multiple aliases
+        let mut aliases_export = HashMap::new();
+        aliases_export.insert(
+            "Servers".to_string(),
+            vec!["192.168.1.100".to_string()]
+        );
+        aliases_export.insert(
+            "WebServers".to_string(),
+            vec!["192.168.1.100".to_string()]
+        );
+
+        let aliases_cache = transform_aliases_for_import(&aliases_export);
+
+        assert!(aliases_cache.contains_key("192.168.1.100"));
+        let aliases = &aliases_cache["192.168.1.100"];
+        assert_eq!(aliases.len(), 2, "IP should have 2 alias mappings");
+
+        let alias_names: Vec<String> = aliases.iter().map(|a| a.alias_name.clone()).collect();
+        assert!(alias_names.contains(&"Servers".to_string()));
+        assert!(alias_names.contains(&"WebServers".to_string()));
     }
 }

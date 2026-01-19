@@ -1,15 +1,18 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useEnrichmentStore } from '@/stores/enrichment-store';
-import { AlertTriangle, RefreshCw, FolderOpen, X } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Upload, X } from 'lucide-react';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
+import { importEnrichmentData } from '@/services/enrichment-import-service';
 
 export function OfflineBanner() {
   const connectionStatus = useEnrichmentStore((state) => state.connectionStatus);
   const lastError = useEnrichmentStore((state) => state.lastError);
   const setConnectionStatus = useEnrichmentStore((state) => state.setConnectionStatus);
+  const setBackupEnrichment = useEnrichmentStore((state) => state.setBackupEnrichment);
 
   const [isRetrying, setIsRetrying] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [isDismissed, setIsDismissed] = useState(() => {
     return sessionStorage.getItem('offline-banner-dismissed') === 'true';
   });
@@ -37,9 +40,18 @@ export function OfflineBanner() {
     sessionStorage.setItem('offline-banner-dismissed', 'true');
   };
 
-  const handleLoadBackup = () => {
-    // TODO: Story 4.2 - Load backup enrichment
-    toast('Backup enrichment loading not yet implemented');
+  const handleLoadBackup = async () => {
+    setIsImporting(true);
+    try {
+      const success = await importEnrichmentData();
+      if (success) {
+        // Hide banner after successful import
+        setIsDismissed(true);
+        sessionStorage.setItem('offline-banner-dismissed', 'true');
+      }
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   return (
@@ -62,10 +74,11 @@ export function OfflineBanner() {
         <div className="flex items-center gap-2">
           <button
             onClick={handleLoadBackup}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-900 dark:text-amber-100 hover:bg-amber-200 dark:hover:bg-amber-800/50 rounded transition-colors"
+            disabled={isImporting}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-900 dark:text-amber-100 hover:bg-amber-200 dark:hover:bg-amber-800/50 rounded transition-colors disabled:opacity-50"
           >
-            <FolderOpen className="h-4 w-4" />
-            Load Backup Enrichment
+            <Upload className={`h-4 w-4 ${isImporting ? 'animate-pulse' : ''}`} />
+            {isImporting ? 'Loading...' : 'Load Backup Enrichment'}
           </button>
 
           <button

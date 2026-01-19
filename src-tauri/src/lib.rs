@@ -100,6 +100,10 @@ pub fn run() {
             api_client::commands::export_enrichment_data,
             api_client::commands::save_enrichment_export,
             api_client::commands::open_folder,
+            // Story 4.2: Enrichment Import
+            api_client::commands::validate_enrichment_import,
+            api_client::commands::import_enrichment_data,
+            api_client::commands::open_enrichment_file_picker,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

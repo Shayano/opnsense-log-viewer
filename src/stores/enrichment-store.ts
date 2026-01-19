@@ -22,6 +22,15 @@ interface ConnectionInfo {
   lastChecked: string; // ISO 8601 timestamp
 }
 
+// Story 4.2: Backup enrichment metadata
+interface BackupMetadata {
+  importedAt: string;
+  ageDays: number;
+  sourceFile: string;
+  exportTimestamp: string;
+  deviceId: string;
+}
+
 interface EnrichmentStore {
   // Interface mappings
   interfaceMappings: Map<string, string>; // physical → logical
@@ -62,6 +71,14 @@ interface EnrichmentStore {
   setConnectionStatus: (info: ConnectionInfo) => void;
   clearError: () => void;
   isConnected: () => boolean;
+
+  // Backup enrichment (Story 4.2)
+  backupEnrichmentActive: boolean;
+  backupMetadata: BackupMetadata | null;
+
+  // Backup enrichment actions
+  setBackupEnrichment: (metadata: BackupMetadata) => void;
+  clearBackupEnrichment: () => void;
 }
 
 export const useEnrichmentStore = create<EnrichmentStore>((set, get) => ({
@@ -206,5 +223,30 @@ export const useEnrichmentStore = create<EnrichmentStore>((set, get) => ({
   isConnected: () => {
     const { connectionStatus } = get();
     return connectionStatus === 'connected';
+  },
+
+  // ============================================================================
+  // Backup Enrichment (Story 4.2)
+  // ============================================================================
+
+  // Initial backup enrichment state
+  backupEnrichmentActive: false,
+  backupMetadata: null,
+
+  // Set backup enrichment metadata
+  setBackupEnrichment: (metadata) => {
+    set({
+      backupEnrichmentActive: true,
+      backupMetadata: metadata,
+      connectionStatus: 'disconnected', // Update connection status to reflect backup mode
+    });
+  },
+
+  // Clear backup enrichment
+  clearBackupEnrichment: () => {
+    set({
+      backupEnrichmentActive: false,
+      backupMetadata: null,
+    });
   },
 }));

@@ -255,3 +255,57 @@ pub struct ExportResult {
     /// Cache status for UI display
     pub cache_status: CacheStatus,
 }
+
+// ============================================================================
+// Enrichment Import Types (Story 4.2)
+// ============================================================================
+
+/// Validation result for enrichment import
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportValidation {
+    /// Whether validation passed
+    pub is_valid: bool,
+
+    /// Specific error message if validation failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+
+    /// Missing fields (if any)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing_fields: Option<Vec<String>>,
+
+    /// Age of enrichment in days
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub age_days: Option<i64>,
+
+    /// Whether enrichment is stale (>7 days)
+    pub is_stale: bool,
+
+    /// Export metadata from file (if valid)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<ExportMetadata>,
+}
+
+/// Import command result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportResult {
+    /// Number of interfaces imported
+    pub interfaces_imported: usize,
+
+    /// Number of rule labels imported
+    pub rules_imported: usize,
+
+    /// Number of aliases imported
+    pub aliases_imported: usize,
+
+    /// Export timestamp from file
+    pub export_timestamp: DateTime<Utc>,
+
+    /// Device source identifier
+    pub device_id: String,
+
+    /// Age in days
+    pub age_days: i64,
+}

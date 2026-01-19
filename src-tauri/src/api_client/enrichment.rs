@@ -488,3 +488,58 @@ mod export_tests {
         assert!(hash.chars().all(|c| c.is_ascii_hexdigit()), "Hash should be valid hex");
     }
 }
+
+// ============================================================================
+// Enrichment Import Helpers (Story 4.2)
+// ============================================================================
+
+/// Staleness threshold for enrichment data (in days)
+/// Data older than this threshold triggers a warning during import
+pub const ENRICHMENT_STALENESS_THRESHOLD_DAYS: i64 = 7;
+
+/// Calculate age of enrichment data in days
+///
+/// Returns the number of days since the export timestamp
+/// Used to determine if enrichment data is stale (>ENRICHMENT_STALENESS_THRESHOLD_DAYS days)
+pub fn calculate_enrichment_age(export_timestamp: &chrono::DateTime<chrono::Utc>) -> Result<i64> {
+    let now = chrono::Utc::now();
+    let age = now.signed_duration_since(*export_timestamp);
+
+    // Return age in days (fractional days rounded down)
+    Ok(age.num_days())
+}
+
+#[cfg(test)]
+mod import_tests {
+    use super::*;
+    use chrono::{Duration, Utc};
+
+    #[test]
+    fn test_calculate_enrichment_age_recent() {
+        let recent = Utc::now() - Duration::hours(12);
+        let age = calculate_enrichment_age(&recent).unwrap();
+        assert_eq!(age, 0, "Recent timestamp should be 0 days old");
+    }
+
+    #[test]
+    fn test_calculate_enrichment_age_old() {
+        let old = Utc::now() - Duration::days(10);
+        let age = calculate_enrichment_age(&old).unwrap();
+        assert_eq!(age, 10, "10-day old timestamp should return 10 days");
+    }
+
+    #[test]
+    fn test_calculate_enrichment_age_exactly_7_days() {
+        let seven_days = Utc::now() - Duration::days(7);
+        let age = calculate_enrichment_age(&seven_days).unwrap();
+        assert_eq!(age, 7);
+    }
+
+    #[test]
+    fn test_calculate_enrichment_age_future() {
+        // Edge case: future timestamp (should handle gracefully)
+        let future = Utc::now() + Duration::days(5);
+        let age = calculate_enrichment_age(&future).unwrap();
+        assert!(age < 0, "Future timestamp should return negative age");
+    }
+}
