@@ -104,5 +104,5 @@ development_status:
     epic-5: in-progress
     5-1-filtered-result-export-csv-json-with-metadata: done
     5-2-full-dataset-export-with-streaming: done # Frontend implementation complete - ExportDialog, ExportWarningModal, ExportProgressModal with elapsed/remaining time, estimateExport & executeStreamingExport services added
-    5-3-export-integrity-verification: done # Code Review in-progress - 6 CRITICAL checksum bugs auto-fixed, frontend pending
+    5-3-export-integrity-verification: done # Frontend implementation complete - Success toast with checksum, ExportVerificationModal, VerifyExportDialog, partial file detection on startup
     epic-5-retrospective: optional

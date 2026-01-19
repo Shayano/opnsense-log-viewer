@@ -1,6 +1,6 @@
 # Story 5.3: Export Integrity & Verification
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -185,58 +185,58 @@ So that I can trust the export data for compliance audits and ensure no corrupti
     - expectedHash: string
     - actualHash: string
 
-- [ ] Update export success toast (AC: Display checksum)
-  - [ ] Modify handleExportComplete() in export-service.ts
-  - [ ] Display verification summary:
+- [x] Update export success toast (AC: Display checksum)
+  - [x] Modify handleExportComplete() in export-service.ts
+  - [x] Display verification summary:
     - Success message: "✅ Export completed successfully"
     - Entries written: "{count} entries"
     - File size: "{size} MB"
     - SHA-256 checksum: "{hash} [Copy]"
-  - [ ] Add [Copy] button next to checksum:
+  - [x] Add [Copy] button next to checksum:
     - Copies full hash to clipboard
     - Shows toast: "Checksum copied to clipboard"
-  - [ ] Add [Open Folder] button
-  - [ ] Use react-hot-toast with custom content component
+  - [x] Add [Open Folder] button
+  - [x] Use react-hot-toast with custom content component
 
-- [ ] Create verification summary modal (AC: Verification display)
-  - [ ] Create ExportVerificationModal component in components/dialogs/
-  - [ ] Display comprehensive verification details:
+- [x] Create verification summary modal (AC: Verification display)
+  - [x] Create ExportVerificationModal component in components/dialogs/
+  - [x] Display comprehensive verification details:
     - Export status: ✅ Complete or ⚠️ Incomplete
     - Entries written: {count}
     - File size: {size}
     - SHA-256: {hash} with [Copy] button
     - Verification passed: ✅ or ❌
-  - [ ] [Open Folder] button
-  - [ ] [Close] button
-  - [ ] Use Radix UI Dialog component
-  - [ ] Dark/light theme support
-  - [ ] Accessible (ARIA, keyboard nav)
+  - [x] [Open Folder] button
+  - [x] [Close] button
+  - [x] Use Radix UI Dialog component
+  - [x] Dark/light theme support
+  - [x] Accessible (ARIA, keyboard nav)
 
-- [ ] Add verify export file feature (AC: Post-export verification)
-  - [ ] Add "Verify Export File" option to Settings menu
-  - [ ] Create VerifyExportDialog component:
+- [x] Add verify export file feature (AC: Post-export verification)
+  - [x] Add "Verify Export File" option to Settings menu
+  - [x] Create VerifyExportDialog component:
     - [Select File] button (opens file picker)
     - Selected file path display
     - [Verify] button
-  - [ ] Create verification service in export-service.ts:
+  - [x] Create verification service in export-service.ts:
     - verifyExportFile(filePath: string)
     - Calls verify_export_file command
     - Shows verification result modal
-  - [ ] Display verification result:
+  - [x] Display verification result:
     - ✅ Valid: "Checksum valid - file is intact"
     - ❌ Invalid: "Checksum mismatch - file may be corrupted"
     - Show expected vs actual hash
   - [ ] Add unit tests for verification flow
 
-- [ ] Implement partial file detection (AC: Incomplete export handling)
-  - [ ] Add detect_incomplete_exports() to export-service.ts
-  - [ ] Call on app startup (in App.tsx or main.tsx)
-  - [ ] If incomplete files found:
+- [x] Implement partial file detection (AC: Incomplete export handling)
+  - [x] Add detect_incomplete_exports() to export-service.ts
+  - [x] Call on app startup (in App.tsx or main.tsx)
+  - [x] If incomplete files found:
     - Show notification: "Incomplete export detected. Delete partial file? [Yes] [No]"
     - [Yes]: Call cleanup_partial_export() command
     - [No]: Dismiss notification
-  - [ ] Use react-hot-toast for notification
-  - [ ] Store detection result in local state to avoid repeated prompts
+  - [x] Use react-hot-toast for notification
+  - [x] Store detection result in local state to avoid repeated prompts
 
 ### Testing
 
