@@ -15,6 +15,7 @@ import { ApiReconnectedPrompt } from './components/dialogs/api-reconnected-promp
 import { loadApiCredentials, testApiConnection } from './utils/api-client';
 import { useEnrichmentStore } from './stores/enrichment-store';
 import { loadCachedRuleLabels } from './services/enrichment-service';
+import { detectIncompleteExports, cleanupPartialExport } from './services/export-service';
 import toast from 'react-hot-toast';
 
 interface InterfaceMappingCache {
@@ -120,6 +121,54 @@ function App() {
   // Story 3.3: Auto-load rule labels on app startup
   useEffect(() => {
     loadCachedRuleLabels();
+  }, []);
+
+  // Story 5.3: Detect incomplete exports on startup
+  useEffect(() => {
+    const checkIncompleteExports = async () => {
+      try {
+        const incompleteFiles = await detectIncompleteExports();
+
+        if (incompleteFiles.length > 0) {
+          incompleteFiles.forEach((filePath) => {
+            toast(
+              (t) => (
+                <div className="flex flex-col gap-2">
+                  <div className="font-medium text-yellow-900 dark:text-yellow-100">
+                    Incomplete export detected
+                  </div>
+                  <div className="text-sm text-gray-700 dark:text-gray-300">
+                    {filePath}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={async () => {
+                        await cleanupPartialExport(filePath);
+                        toast.dismiss(t.id);
+                      }}
+                      className="px-3 py-1 text-sm font-medium bg-red-100 dark:bg-red-800 rounded hover:bg-red-200 dark:hover:bg-red-700 transition-colors"
+                    >
+                      Delete
+                    </button>
+                    <button
+                      onClick={() => toast.dismiss(t.id)}
+                      className="px-3 py-1 text-sm font-medium bg-gray-100 dark:bg-gray-800 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      Keep
+                    </button>
+                  </div>
+                </div>
+              ),
+              { duration: Infinity, icon: '⚠️' }
+            );
+          });
+        }
+      } catch (error) {
+        console.error('Failed to check for incomplete exports:', error);
+      }
+    };
+
+    checkIncompleteExports();
   }, []);
 
   return (
