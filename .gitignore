@@ -2,14 +2,12 @@
 /target/
 src-tauri/target/
 **/*.rs.bk
-Cargo.lock
 
 # Node.js / npm
 node_modules/
 dist/
 dist-ssr/
 *.local
-package-lock.json
 pnpm-lock.yaml
 yarn.lock
 
