@@ -22,6 +22,8 @@ const RELATIVE_TIME_OPTIONS: { value: RelativeTimeRange; label: string }[] = [
 export function ValueInput({ fieldType, operatorType, value, onChange, error }: ValueInputProps): JSX.Element {
   // Get interface mappings from enrichment store
   const interfaceMappings = useEnrichmentStore((state) => state.interfaceMappings);
+  // Get rule labels from enrichment store (Story 3.3)
+  const ruleLabels = useEnrichmentStore((state) => state.ruleLabels);
 
   // Interface dropdown with logical names
   if (fieldType === 'interface') {
@@ -81,6 +83,71 @@ export function ValueInput({ fieldType, operatorType, value, onChange, error }: 
           ))}
         </select>
         {error && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
+      </div>
+    );
+  }
+
+  // Rule Label dropdown with autocomplete (Story 3.3)
+  if (fieldType === 'ruleLabel') {
+    // Convert Map to array of options
+    const ruleLabelOptions = Array.from(ruleLabels.entries()).map(
+      ([hash, description]) => ({
+        value: hash, // Store hash (for backend query compatibility)
+        label: description, // Display human-readable description
+      })
+    );
+
+    // If no rule labels are available, show a text input instead
+    if (ruleLabelOptions.length === 0) {
+      return (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            3. Enter Rule Label
+          </label>
+          <input
+            type="text"
+            value={(value as string) || ''}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="e.g., Block RFC1918 or rule hash"
+            className="w-full px-3 py-2 bg-white dark:bg-gray-800
+              border border-gray-300 dark:border-gray-700 rounded
+              text-gray-900 dark:text-gray-100 font-mono text-sm
+              focus:ring-2 focus:ring-blue-500"
+            aria-label="Rule label"
+          />
+          {error && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Note: Load logs to see rule labels in dropdown
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          3. Select Rule Label
+        </label>
+        <select
+          value={(value as string) || ''}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full px-3 py-2 bg-white dark:bg-gray-800
+            border border-gray-300 dark:border-gray-700 rounded
+            text-gray-900 dark:text-gray-100
+            focus:ring-2 focus:ring-blue-500"
+          aria-label="Select rule label"
+        >
+          <option value="">Choose rule...</option>
+          {ruleLabelOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        {error && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          {ruleLabelOptions.length} rule labels available
+        </p>
       </div>
     );
   }
@@ -272,13 +339,10 @@ export function ValueInput({ fieldType, operatorType, value, onChange, error }: 
     );
   }
 
-  // Text input for IPs, Rule Label (Interface is handled above)
+  // Text input for IPs and other text fields (Interface and Rule Label are handled above)
   const getPlaceholder = (): string => {
     if (fieldType === 'sourceIp' || fieldType === 'destinationIp') {
       return 'e.g., 192.168.1.1 or 10.0.0.0/24';
-    }
-    if (fieldType === 'ruleLabel') {
-      return 'e.g., Block RFC1918';
     }
     if (operatorType === 'regex') {
       return 'e.g., ^192\\.168\\.*';
