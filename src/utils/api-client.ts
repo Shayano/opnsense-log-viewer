@@ -8,12 +8,14 @@ import type { ApiCredentials, ConnectionTestResult } from '../types/api';
 export async function saveApiCredentials(
   endpointUrl: string,
   apiKey: string,
-  apiSecret: string
+  apiSecret: string,
+  acceptInvalidCerts: boolean = false
 ): Promise<void> {
   await invoke('save_api_credentials', {
     endpointUrl,
     apiKey,
     apiSecret,
+    acceptInvalidCerts,
   });
 }
 
@@ -30,11 +32,13 @@ export async function loadApiCredentials(): Promise<ApiCredentials | null> {
 export async function testApiConnection(
   endpointUrl: string,
   apiKey: string,
-  apiSecret: string
+  apiSecret: string,
+  acceptInvalidCerts: boolean = false
 ): Promise<ConnectionTestResult> {
   return await invoke<ConnectionTestResult>('test_api_connection', {
     endpointUrl,
     apiKey,
     apiSecret,
+    acceptInvalidCerts,
   });
 }

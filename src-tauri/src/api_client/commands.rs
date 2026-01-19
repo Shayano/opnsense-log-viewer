@@ -1,7 +1,7 @@
 use tauri::{command, AppHandle, Emitter, State};
 use crate::api_client::types::{AliasMapping, ApiCredentials, CacheStatus, ConnectionInfo, ConnectionStatus, ConnectionTestResult, ExportedEnrichmentData, ExportMetadata, ExportResult, ImportResult, ImportValidation, InterfaceMappingCache};
 use crate::api_client::client::test_connection;
-use crate::api_client::enrichment::{calculate_config_hash, calculate_enrichment_age, fetch_aliases_batch, fetch_interface_mappings, fetch_opnsense_version, fetch_rule_labels_batch, ENRICHMENT_STALENESS_THRESHOLD_DAYS};
+use crate::api_client::enrichment::{calculate_config_hash, calculate_enrichment_age, fetch_aliases_batch, fetch_all_aliases, fetch_all_rule_labels, fetch_interface_mappings, fetch_opnsense_version, fetch_rule_labels_batch, ENRICHMENT_STALENESS_THRESHOLD_DAYS};
 use crate::credentials::{manager, encrypted_storage};
 use crate::state::EnrichmentCacheState;
 use log::{info, warn};
@@ -14,6 +14,7 @@ pub async fn save_api_credentials(
     endpoint_url: String,
     api_key: String,
     api_secret: String,
+    accept_invalid_certs: Option<bool>,
 ) -> Result<(), String> {
     // Validate inputs
     if endpoint_url.is_empty() || api_key.is_empty() || api_secret.is_empty() {
@@ -30,6 +31,7 @@ pub async fn save_api_credentials(
         api_key,
         api_secret,
         profile_name: None,
+        accept_invalid_certs: accept_invalid_certs.unwrap_or(false),
     };
 
     // Try OS keychain first
@@ -74,6 +76,7 @@ pub async fn test_api_connection(
     endpoint_url: String,
     api_key: String,
     api_secret: String,
+    accept_invalid_certs: Option<bool>,
     app_handle: AppHandle,
     cache_state: State<'_, EnrichmentCacheState>,
 ) -> Result<ConnectionTestResult, String> {
@@ -92,49 +95,84 @@ pub async fn test_api_connection(
         api_key,
         api_secret,
         profile_name: None,
+        accept_invalid_certs: accept_invalid_certs.unwrap_or(false),
     };
 
     let result = test_connection(&credentials)
         .await
         .map_err(|e| {
-            // Format user-friendly error messages
-            if e.to_string().contains("Authentication failed") {
+            let error_str = e.to_string();
+            // Format user-friendly error messages with specific error detection
+            if error_str.contains("Authentication failed") {
                 "Authentication failed: Invalid API key or secret. Verify credentials in OPNsense.".to_string()
-            } else if e.to_string().contains("Connection refused") {
+            } else if error_str.contains("API returned HTML") || error_str.contains("HTML instead of JSON") {
+                // Extract the helpful message from InvalidResponse
+                if error_str.contains("API returned HTML") {
+                    // Return the detailed message from InvalidResponse
+                    error_str
+                } else {
+                    format!("API returned HTML instead of JSON. This usually means:\n\
+                            1. The endpoint URL is incorrect or the port is wrong\n\
+                            2. Authentication failed and you were redirected to a login page\n\
+                            3. The API endpoint doesn't exist on this OPNsense instance\n\
+                            \n\
+                            Verify that:\n\
+                            - The endpoint URL is correct (e.g., https://192.168.1.1 or https://192.168.1.1:443)\n\
+                            - The port number is correct (usually the same as the web interface, typically 443 for HTTPS)\n\
+                            - The API key and secret are valid\n\
+                            - The OPNsense API is enabled in System > Settings > API")
+                }
+            } else if error_str.contains("TLS certificate") 
+                || error_str.contains("certificate verify failed")
+                || error_str.contains("invalid peer certificate")
+                || error_str.contains("unable to get local issuer certificate")
+                || error_str.contains("self signed certificate")
+                || error_str.contains("certificate signed by unknown authority") {
+                format!("TLS certificate validation failed: The server uses a self-signed or invalid certificate. Enable 'Accept Invalid Certificates' option above and try again. Error details: {}", error_str)
+            } else if error_str.contains("Connection refused") {
                 format!("Connection refused: Unable to reach {}. Check firewall and network settings.", endpoint_url)
-            } else if e.to_string().contains("certificate") {
-                format!("TLS certificate error: {}. Enable 'Accept Invalid Certificates' in Advanced settings (not recommended).", e)
-            } else if e.to_string().contains("timeout") {
+            } else if error_str.contains("timeout") {
                 "Request timeout: OPNsense API did not respond within 10 seconds.".to_string()
             } else {
-                format!("Connection failed: {}", e)
+                format!("Connection failed: {}", error_str)
             }
         })?;
 
-    // Auto-fetch interface mappings on successful connection
+    // Auto-fetch interfaces, rule labels, and aliases on successful connection (no log file required)
     if result.success {
         let credentials_clone = credentials.clone();
         let cache_state_clone = (*cache_state).clone();
         let app_handle_clone = app_handle.clone();
 
-        // Spawn background task to fetch mappings (don't block connection test)
         tokio::spawn(async move {
-            match fetch_interface_mappings(&credentials_clone).await {
-                Ok(mappings) => {
-                    // Cache mappings
-                    cache_state_clone.set_interface_mappings(
-                        mappings.clone(),
-                        credentials_clone.endpoint_url.clone(),
-                    );
+            // 1) Interfaces
+            if let Ok(mappings) = fetch_interface_mappings(&credentials_clone).await {
+                cache_state_clone.set_interface_mappings(
+                    mappings.clone(),
+                    credentials_clone.endpoint_url.clone(),
+                );
+                let _ = app_handle_clone.emit("interface-mappings-updated", mappings);
+                info!("Interface mappings auto-fetched on connection success");
+            } else {
+                warn!("Failed to auto-fetch interface mappings");
+            }
 
-                    // Emit event to frontend
-                    let _ = app_handle_clone.emit("interface-mappings-updated", mappings);
+            // 2) All rule labels (full ruleset)
+            match fetch_all_rule_labels(&credentials_clone).await {
+                Ok(labels) => {
+                    cache_state_clone.set_rule_labels(labels.clone(), credentials_clone.endpoint_url.clone());
+                    info!("Rule labels auto-fetched on connection: {} entries", labels.len());
+                }
+                Err(e) => warn!("Failed to auto-fetch rule labels: {}", e),
+            }
 
-                    info!("Interface mappings auto-fetched on connection success");
+            // 3) All aliases (full alias definitions)
+            match fetch_all_aliases(&credentials_clone).await {
+                Ok(alias_map) => {
+                    cache_state_clone.set_aliases(alias_map.clone(), credentials_clone.endpoint_url.clone());
+                    info!("Aliases auto-fetched on connection: {} IPs", alias_map.len());
                 }
-                Err(e) => {
-                    warn!("Failed to auto-fetch interface mappings: {}", e);
-                }
+                Err(e) => warn!("Failed to auto-fetch aliases: {}", e),
             }
         });
     }
@@ -925,35 +963,33 @@ pub async fn reconnect_api(
         Ok(_) => {
             info!("API reconnection successful");
 
-            // Fetch fresh enrichment data in parallel
-            let interfaces_fut = fetch_interface_mappings(&credentials);
-            let rule_labels_fut = {
-                // Fetch rule labels (we don't have a list of hashes, so fetch empty for now)
-                // In production, you'd typically fetch all rules or cache previously seen hashes
-                let empty_hashes = vec![];
-                fetch_rule_labels_batch(&credentials, empty_hashes)
-            };
-            let aliases_fut = {
-                // Fetch aliases (similarly, we'd need a list of IPs)
-                let empty_ips = vec![];
-                fetch_aliases_batch(&credentials, empty_ips)
-            };
-
-            // Execute in parallel
-            let (interfaces_result, rule_labels_result, aliases_result) = tokio::join!(
-                interfaces_fut,
-                rule_labels_fut,
-                aliases_fut
-            );
-
-            // Update cache with fresh data
-            let interfaces: HashMap<String, String> = interfaces_result.map_err(|e| format!("Failed to fetch interfaces: {}", e))?;
-            let rule_labels: HashMap<String, String> = rule_labels_result.map_err(|e| format!("Failed to fetch rule labels: {}", e))?;
-            let aliases: HashMap<String, Vec<crate::api_client::types::AliasMapping>> = aliases_result.map_err(|e| format!("Failed to fetch aliases: {}", e))?;
+            // Fetch interfaces, all rule labels, and all aliases at connection (no log file required)
+            let interfaces = fetch_interface_mappings(&credentials).await
+                .map_err(|e| format!("Failed to fetch interfaces: {}", e))?;
 
             cache_state.set_interface_mappings(interfaces.clone(), credentials.endpoint_url.clone());
-            cache_state.set_rule_labels(rule_labels.clone(), credentials.endpoint_url.clone());
-            cache_state.set_aliases(aliases.clone(), credentials.endpoint_url.clone());
+
+            let rules_count = match fetch_all_rule_labels(&credentials).await {
+                Ok(labels) => {
+                    cache_state.set_rule_labels(labels.clone(), credentials.endpoint_url.clone());
+                    labels.len()
+                }
+                Err(e) => {
+                    warn!("fetch_all_rule_labels on reconnect failed: {}", e);
+                    cache_state.get_all_rule_labels().map(|c| c.mappings.len()).unwrap_or(0)
+                }
+            };
+
+            let aliases_count = match fetch_all_aliases(&credentials).await {
+                Ok(alias_map) => {
+                    cache_state.set_aliases(alias_map.clone(), credentials.endpoint_url.clone());
+                    alias_map.len()
+                }
+                Err(e) => {
+                    warn!("fetch_all_aliases on reconnect failed: {}", e);
+                    cache_state.get_all_aliases().map(|c| c.mappings.len()).unwrap_or(0)
+                }
+            };
 
             // Update connection status to Connected
             cache_state.set_connection_status(ConnectionStatus::Connected, None);
@@ -977,15 +1013,15 @@ pub async fn reconnect_api(
                 .flatten();
 
             info!("Reconnection complete: {} interfaces, {} rules, {} aliases",
-                  interfaces.len(), rule_labels.len(), aliases.len());
+                  interfaces.len(), rules_count, aliases_count);
 
             Ok(crate::api_client::types::ConnectionResult {
                 connected: true,
                 opnsense_version,
                 error_message: None,
                 interfaces_count: interfaces.len(),
-                rules_count: rule_labels.len(),
-                aliases_count: aliases.len(),
+                rules_count,
+                aliases_count,
             })
         }
         Err(e) => {

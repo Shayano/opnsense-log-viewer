@@ -25,46 +25,54 @@ pub fn run() {
     let enrichment_cache = state::EnrichmentCacheState::new();
     let cache_clone = enrichment_cache.clone();
 
-    // Spawn background health check task (Story 3.5)
-    tokio::spawn(async move {
-        use tokio::time::{interval, Duration};
-        use log::{debug, info};
+    tauri::Builder::default()
+        .manage(enrichment_cache) // Register enrichment cache state
+        .setup(move |_app| {
+            // Initialize logging - logs visible with RUST_LOG=debug or RUST_LOG=info
+            tracing_subscriber::fmt::init();
+            // log::info! / [MEM] logs need env_logger; use RUST_LOG=info to see them
+            let _ = env_logger::try_init();
 
-        let mut interval_timer = interval(Duration::from_secs(30));
+            // Spawn background health check task (Story 3.5)
+            // Must be inside setup() because Tokio runtime is only available after Tauri starts
+            tauri::async_runtime::spawn(async move {
+                use tokio::time::{interval, Duration};
+                use log::{debug, info};
 
-        loop {
-            interval_timer.tick().await;
+                let mut interval_timer = interval(Duration::from_secs(30));
 
-            // Only attempt reconnect if currently disconnected
-            if !cache_clone.is_connected() {
-                debug!("Background health check: attempting reconnect");
+                loop {
+                    interval_timer.tick().await;
 
-                // Load credentials
-                if let Some(credentials) = credentials::manager::load_credentials()
-                    .ok()
-                    .flatten()
-                    .or_else(|| credentials::encrypted_storage::decrypt_and_load().ok().flatten())
-                {
-                    // Attempt silent reconnection
-                    match api_client::client::test_connection(&credentials).await {
-                        Ok(_) => {
-                            info!("Background reconnection succeeded");
-                            cache_clone.set_connection_status(
-                                api_client::types::ConnectionStatus::Connected,
-                                None
-                            );
-                        }
-                        Err(e) => {
-                            debug!("Background reconnection failed: {}", e);
+                    // Only attempt reconnect if currently disconnected
+                    if !cache_clone.is_connected() {
+                        debug!("Background health check: attempting reconnect");
+
+                        // Load credentials
+                        if let Some(credentials) = credentials::manager::load_credentials()
+                            .ok()
+                            .flatten()
+                            .or_else(|| credentials::encrypted_storage::decrypt_and_load().ok().flatten())
+                        {
+                            // Attempt silent reconnection
+                            match api_client::client::test_connection(&credentials).await {
+                                Ok(_) => {
+                                    info!("Background reconnection succeeded");
+                                    cache_clone.set_connection_status(
+                                        api_client::types::ConnectionStatus::Connected,
+                                        None
+                                    );
+                                }
+                                Err(e) => {
+                                    debug!("Background reconnection failed: {}", e);
+                                }
+                            }
                         }
                     }
                 }
-            }
-        }
-    });
-
-    tauri::Builder::default()
-        .manage(enrichment_cache) // Register enrichment cache state
+            });
+            Ok(())
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -78,6 +86,7 @@ pub fn run() {
             commands::storage::delete_index_by_hash,
             commands::storage::load_index_file,
             commands::query::execute_query,
+            commands::query::get_entries_by_ids,
             // Story 3.1: API Connection & Credential Storage
             api_client::commands::save_api_credentials,
             api_client::commands::load_api_credentials,

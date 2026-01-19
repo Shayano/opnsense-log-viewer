@@ -69,6 +69,7 @@ mod tests {
             api_key: "test-key".to_string(),
             api_secret: "test-secret".to_string(),
             profile_name: None,
+            accept_invalid_certs: false,
         };
 
         // Save

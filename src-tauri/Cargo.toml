@@ -29,6 +29,7 @@ regex = "1.10.7"
 csv = "1.3.3"
 lazy_static = "1.5.0"
 log = "0.4.22"
+env_logger = "0.11"
 thiserror = "2.0.9"
 roaring = { version = "0.10", features = ["serde"] }
 sha2 = "0.10"

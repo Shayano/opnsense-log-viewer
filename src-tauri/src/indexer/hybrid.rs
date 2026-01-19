@@ -1,7 +1,8 @@
+use std::fs::File;
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::io::Read;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -11,7 +12,7 @@ use crate::indexer::inverted::InvertedIndex;
 use crate::indexer::bitmap::BitmapIndex;
 use crate::indexer::offset_table::OffsetTable;
 use crate::indexer::progress::IndexProgress;
-use crate::parser::parse_file_streaming;
+use crate::parser::{csv_filterlog, rfc3164, rfc5424};
 use crate::types::log_entry::LogFormat;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,68 +108,91 @@ impl HybridIndex {
         // Calculate SHA-256 hash of source file
         let source_hash = Self::calculate_file_hash(file_path)?;
 
-        // Parse file and build indexes
-        let (entries, _parse_stats) = parse_file_streaming(file_path, format)
-            .map_err(|e| IndexError::ParseError(e.to_string()))?;
+        // Build indexes by reading line-by-line to avoid loading the entire file into memory.
+        let file = File::open(file_path)?;
+        let reader = BufReader::new(file);
 
-        let total_entries = entries.len() as u64;
+        let mut line_number = 0u64;
+        let mut entry_id = 0u64;
         let mut bytes_processed = 0u64;
         let start_time = std::time::Instant::now();
         let mut last_progress_time = start_time;
 
-        for (idx, entry) in entries.into_iter().enumerate() {
-            // Check cancellation every 100 entries
-            if idx % 100 == 0 && self.cancellation_token.load(Ordering::Relaxed) {
-                return Err(IndexError::Cancelled);
+        for line_result in reader.lines() {
+            line_number += 1;
+
+            let line = match line_result {
+                Ok(l) => l,
+                Err(e) => return Err(IndexError::IoError(e)),
+            };
+
+            let line_bytes = (line.len() + 1) as u64;
+
+            if line.trim().is_empty() {
+                bytes_processed += line_bytes;
+                continue;
             }
 
-            // Check memory usage every 1000 entries
-            if idx % 1000 == 0 {
-                let memory_usage = self.memory_usage();
-                if memory_usage > 500 * 1024 * 1024 {
-                    return Err(IndexError::MemoryLimitExceeded(memory_usage / (1024 * 1024)));
+            let parse_result = match format {
+                LogFormat::RFC3164 => rfc3164::parse_rfc3164_entry(&line, line_number, entry_id),
+                LogFormat::RFC5424 => rfc5424::parse_rfc5424_entry(&line, line_number, entry_id),
+                LogFormat::CSV => csv_filterlog::parse_csv_filterlog_entry(&line, line_number, entry_id),
+                LogFormat::Unknown => {
+                    return Err(IndexError::ParseError("Unknown format".to_string()));
+                }
+            };
+
+            match parse_result {
+                Ok(entry) => {
+                    if entry_id % 100 == 0 && self.cancellation_token.load(Ordering::Relaxed) {
+                        return Err(IndexError::Cancelled);
+                    }
+                    if entry_id % 1000 == 0 {
+                        let memory_usage = self.memory_usage();
+                        if memory_usage > 500 * 1024 * 1024 {
+                            return Err(IndexError::MemoryLimitExceeded(memory_usage / (1024 * 1024)));
+                        }
+                    }
+
+                    self.inverted_index.add_entry(
+                        entry.id,
+                        entry.source_ip.as_deref(),
+                        entry.dest_ip.as_deref(),
+                        entry.source_port,
+                        entry.dest_port,
+                    );
+                    self.bitmap_index.add_entry(
+                        entry.id,
+                        entry.action.as_deref(),
+                        entry.protocol.as_deref(),
+                        entry.interface.as_deref(),
+                    );
+                    self.offset_table.add_offset(entry.id, bytes_processed);
+
+                    bytes_processed += line_bytes;
+                    entry_id += 1;
+
+                    let now = std::time::Instant::now();
+                    if now.duration_since(last_progress_time).as_millis() >= 500 {
+                        let elapsed = start_time.elapsed().as_secs_f64();
+                        progress_callback(IndexProgress::new(bytes_processed, file_size, elapsed));
+                        last_progress_time = now;
+                    }
+                }
+                Err(_) => {
+                    bytes_processed += line_bytes;
                 }
             }
-
-            // Add to inverted index (high-cardinality fields)
-            self.inverted_index.add_entry(
-                entry.id,
-                entry.source_ip.as_deref(),
-                entry.dest_ip.as_deref(),
-                entry.source_port,
-                entry.dest_port,
-            );
-
-            // Add to bitmap index (low-cardinality fields)
-            self.bitmap_index.add_entry(
-                entry.id,
-                entry.action.as_deref(),
-                entry.protocol.as_deref(),
-                entry.interface.as_deref(),
-            );
-
-            // Add offset to offset table (raw line byte offset)
-            // NOTE: In real implementation, would track actual file offsets during parsing
-            // For now, using estimated offset based on average line size
-            let estimated_offset = (idx as u64 * file_size) / total_entries;
-            self.offset_table.add_offset(entry.id, estimated_offset);
-
-            // Update progress every 500ms or at completion
-            bytes_processed += entry.raw_line.len() as u64;
-            let now = std::time::Instant::now();
-            let is_complete = idx == total_entries as usize - 1;
-
-            if now.duration_since(last_progress_time).as_millis() >= 500 || is_complete {
-                let elapsed = start_time.elapsed().as_secs_f64();
-                let progress = IndexProgress::new(
-                    bytes_processed,
-                    file_size,
-                    elapsed,
-                );
-                progress_callback(progress);
-                last_progress_time = now;
-            }
         }
+
+        // Final progress
+        progress_callback(IndexProgress::new(
+            bytes_processed,
+            file_size,
+            start_time.elapsed().as_secs_f64(),
+        ));
+
+        let total_entries = entry_id;
 
         // Create metadata
         let metadata = IndexMetadata {
@@ -181,6 +205,12 @@ impl HybridIndex {
         };
 
         self.metadata = Some(metadata.clone());
+
+        log::info!(
+            "[MEM] HybridIndex::build_index: done entry_count={} memory_usage≈{} bytes (streaming, no full Vec<LogEntry>)",
+            total_entries,
+            self.memory_usage()
+        );
         Ok(metadata)
     }
 

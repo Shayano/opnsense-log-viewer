@@ -7,6 +7,11 @@ export interface ApiCredentials {
   apiKey: string;
   apiSecret: string;
   profileName?: string;
+  /**
+   * Accept invalid TLS certificates (self-signed certificates)
+   * WARNING: This disables certificate validation. Use only for trusted local networks.
+   */
+  acceptInvalidCerts?: boolean;
 }
 
 /**

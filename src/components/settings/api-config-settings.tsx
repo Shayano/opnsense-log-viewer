@@ -16,6 +16,7 @@ interface ApiCredentialsForm {
   endpointUrl: string;
   apiKey: string;
   apiSecret: string;
+  acceptInvalidCerts: boolean;
 }
 
 /**
@@ -57,10 +58,11 @@ export function ApiConfigSettings() {
         setValue('endpointUrl', credentials.endpointUrl);
         setValue('apiKey', credentials.apiKey);
         setValue('apiSecret', credentials.apiSecret);
+        setValue('acceptInvalidCerts', credentials.acceptInvalidCerts ?? false);
 
         // Auto-connect in background
         setConnectionStatus('connecting');
-        testConnectionSilent(credentials);
+        testConnectionSilent({ ...credentials, acceptInvalidCerts: credentials.acceptInvalidCerts ?? false });
       }
     } catch (error) {
       console.error('Failed to load credentials:', error);
@@ -72,7 +74,8 @@ export function ApiConfigSettings() {
       const result = await testApiConnection(
         credentials.endpointUrl,
         credentials.apiKey,
-        credentials.apiSecret
+        credentials.apiSecret,
+        credentials.acceptInvalidCerts
       );
 
       if (result.success) {
@@ -91,7 +94,12 @@ export function ApiConfigSettings() {
     setConnectionStatus('connecting');
 
     try {
-      const result = await testApiConnection(data.endpointUrl, data.apiKey, data.apiSecret);
+      const result = await testApiConnection(
+        data.endpointUrl,
+        data.apiKey,
+        data.apiSecret,
+        data.acceptInvalidCerts
+      );
 
       if (result.success) {
         setConnectionStatus('connected');
@@ -115,7 +123,12 @@ export function ApiConfigSettings() {
     setIsSaving(true);
 
     try {
-      await saveApiCredentials(data.endpointUrl, data.apiKey, data.apiSecret);
+      await saveApiCredentials(
+        data.endpointUrl,
+        data.apiKey,
+        data.apiSecret,
+        data.acceptInvalidCerts
+      );
       toast.success('Credentials saved securely');
     } catch (error) {
       toast.error(String(error));
@@ -243,6 +256,27 @@ export function ApiConfigSettings() {
               {errors.apiSecret.message}
             </p>
           )}
+        </div>
+
+        {/* Accept Invalid Certificates Checkbox */}
+        <div className="flex items-start gap-2 pt-2">
+          <input
+            id="acceptInvalidCerts"
+            type="checkbox"
+            {...register('acceptInvalidCerts')}
+            className="mt-1 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded
+              focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800
+              focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+          />
+          <label
+            htmlFor="acceptInvalidCerts"
+            className="text-sm text-gray-700 dark:text-gray-300 cursor-pointer"
+          >
+            <span className="font-medium">Accept Invalid Certificates</span>
+            <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              Allow self-signed or invalid TLS certificates. Use only for trusted local networks.
+            </span>
+          </label>
         </div>
 
         {/* Action Buttons */}

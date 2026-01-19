@@ -40,14 +40,21 @@ impl QueryExecutor {
         // Execute filters and combine with boolean logic
         let result_bitmap = self.execute_filters(&optimized_filters)?;
 
-        let entry_ids: Vec<usize> = result_bitmap.iter().map(|id| id as usize).collect();
-        let matched_count = entry_ids.len();
+        let matched_count = result_bitmap.len() as usize;
+        // Cap entry_ids to avoid sending millions of IDs to the frontend (memory + IPC).
+        // Frontend only uses the first 20k for get_entries_by_ids; matched_count still reflects the true total.
+        const MAX_ENTRY_IDS_IN_RESULT: usize = 20_000;
+        let entry_ids: Vec<usize> = result_bitmap
+            .iter()
+            .take(MAX_ENTRY_IDS_IN_RESULT)
+            .map(|id| id as usize)
+            .collect();
         let execution_time_ms = start_time.elapsed().as_millis() as u64;
 
         Ok(QueryResult {
             entry_ids,
             total_count: self.total_entries,
-            matched_count,
+            matched_count, // True match count; entry_ids may be capped
             execution_time_ms,
         })
     }

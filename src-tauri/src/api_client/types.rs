@@ -11,6 +11,10 @@ pub struct ApiCredentials {
     pub api_secret: String,
     #[serde(default)]
     pub profile_name: Option<String>, // For future multi-profile support
+    /// Accept invalid TLS certificates (self-signed certificates)
+    /// WARNING: This disables certificate validation. Use only for trusted local networks.
+    #[serde(default)]
+    pub accept_invalid_certs: bool,
 }
 
 /// Connection status for UI indicator

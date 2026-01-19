@@ -126,8 +126,16 @@ pub async fn load_index_file(
     // 6. Store in global state for queries (use shared HYBRID_INDEX)
     use super::query::HYBRID_INDEX;
 
+    let new_mem = persisted_index.hybrid_index.memory_usage();
     {
         let mut guard = HYBRID_INDEX.lock().unwrap();
+        let old_mem = guard.as_ref().map(|i| i.memory_usage()).unwrap_or(0);
+        log::info!(
+            "[MEM] load_index_file: replacing HYBRID_INDEX old≈{} bytes with loaded index≈{} bytes entry_count={}",
+            old_mem,
+            new_mem,
+            persisted_index.source_metadata.entry_count
+        );
         *guard = Some(persisted_index.hybrid_index.clone());
     }
 

@@ -1,6 +1,7 @@
 import { useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { Loader2 } from 'lucide-react';
 import { ThemeToggle } from './components/theme-toggle';
 import { Toaster } from './components/base';
 import { ErrorBoundary } from './components/error-boundary';
@@ -12,8 +13,12 @@ import { OfflineBanner } from './components/api-status/offline-banner';
 import { ConnectionIndicator } from './components/api-status/connection-indicator';
 import { StalenessIndicator, MinimizedStalenessIcon } from './components/enrichment';
 import { ApiReconnectedPrompt } from './components/dialogs/api-reconnected-prompt';
+import { ResultCount } from './components/result-count';
+import { EmptyResultsState } from './components/result-count';
+import { LogTable } from './components/log-table';
 import { loadApiCredentials, testApiConnection } from './utils/api-client';
 import { useEnrichmentStore } from './stores/enrichment-store';
+import { useQueryStore } from './stores/query-store';
 import { loadCachedRuleLabels, loadCachedAliases } from './services/enrichment-service';
 import { detectIncompleteExports, cleanupPartialExport } from './services/export-service';
 import toast from 'react-hot-toast';
@@ -28,6 +33,7 @@ function App() {
   const setInterfaceMappings = useEnrichmentStore((state) => state.setInterfaceMappings);
   const setConnectionStatus = useEnrichmentStore((state) => state.setConnectionStatus);
   const connectionStatus = useEnrichmentStore((state) => state.connectionStatus);
+  const { currentResult, currentEntries, entriesLoading } = useQueryStore();
 
   // Story 3.1: Auto-load credentials on app startup (AC requirement)
   useEffect(() => {
@@ -215,6 +221,25 @@ function App() {
               <FileError />
               <FileSelector />
             </div>
+
+            {/* Search Results: LogTable with enrichment (rule labels, aliases) */}
+            {currentResult && (
+              <div className="mb-8 mt-8">
+                <ResultCount />
+                {entriesLoading ? (
+                  <div className="flex items-center justify-center py-12 gap-2 text-gray-600 dark:text-gray-400">
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                    <span>Loading entries...</span>
+                  </div>
+                ) : currentResult.matchedCount === 0 ? (
+                  <EmptyResultsState />
+                ) : (
+                  <div className="min-h-[400px] flex flex-col border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                    <LogTable entries={currentEntries ?? []} />
+                  </div>
+                )}
+              </div>
+            )}
 
             <h2 className="text-xl font-medium mb-6 mt-12">Component Showcase</h2>
             <p className="text-gray-600 dark:text-gray-400 mb-8">

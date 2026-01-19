@@ -101,9 +101,15 @@ pub async fn index_file(
         }
     };
 
-    // 7. Parse log file with streaming parser
+    // 7. Parse log file with streaming parser (loads FULL file into RAM)
+    log::info!("[MEM] index_file: calling parse_file_streaming (full load) path={:?}", canonical_path);
     let (entries, stats) = parse_file_streaming(&canonical_path, detected_format)
         .map_err(|e| format!("Failed to parse log file: {}", e))?;
+
+    log::info!(
+        "[MEM] index_file: parse_file_streaming done entries={} (Vec held until return)",
+        entries.len()
+    );
 
     // Log parsing statistics
     log::info!(
@@ -195,9 +201,15 @@ pub async fn index_file_with_format(
         }
     };
 
-    // 4. Parse log file with specified format
+    // 4. Parse log file with specified format (loads FULL file into RAM)
+    log::info!("[MEM] index_file_with_format: calling parse_file_streaming (full load) path={:?}", canonical_path);
     let (entries, stats) = parse_file_streaming(&canonical_path, log_format)
         .map_err(|e| format!("Failed to parse log file: {}", e))?;
+
+    log::info!(
+        "[MEM] index_file_with_format: parse_file_streaming done entries={} (Vec held until return)",
+        entries.len()
+    );
 
     // Log parsing statistics
     log::info!(
@@ -284,6 +296,11 @@ pub async fn build_hybrid_index(
     // Store the index in global state for cancellation
     {
         let mut guard = HYBRID_INDEX.lock().unwrap();
+        let old_mem = guard.as_ref().map(|i| i.memory_usage()).unwrap_or(0);
+        log::info!(
+            "[MEM] build_hybrid_index: replacing HYBRID_INDEX (old≈{} bytes dropped), inserting empty for stream build",
+            old_mem
+        );
         *guard = Some(hybrid_index);
     }
 
@@ -305,6 +322,13 @@ pub async fn build_hybrid_index(
 
     match result {
         Ok(metadata) => {
+            let mem = HYBRID_INDEX.lock().unwrap().as_ref().map(|i| i.memory_usage()).unwrap_or(0);
+            log::info!(
+                "[MEM] build_hybrid_index: build_index done HYBRID_INDEX≈{} bytes entry_count={}",
+                mem,
+                metadata.entry_count
+            );
+
             // NEW Story 1.4: Save index to disk
             let save_result = (|| -> Result<(), String> {
                 // Calculate source file hash (bytes)

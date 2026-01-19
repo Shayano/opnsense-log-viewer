@@ -35,10 +35,10 @@ pub async fn fetch_interface_mappings(
 
     debug!("Fetching interface mappings from OPNsense API");
 
+    // OPNsense API uses Basic Authentication (not custom headers)
     let response = client
         .get(&url)
-        .header("X-API-Key", &credentials.api_key)
-        .header("X-API-Secret", &credentials.api_secret)
+        .basic_auth(&credentials.api_key, Some(&credentials.api_secret))
         .send()
         .await
         .context("Failed to fetch interface mappings")?;
@@ -106,10 +106,10 @@ async fn fetch_rule_label(
         "searchPhrase": rule_hash
     });
 
+    // OPNsense API uses Basic Authentication (not custom headers)
     let response = client
         .post(&url)
-        .header("X-API-Key", &credentials.api_key)
-        .header("X-API-Secret", &credentials.api_secret)
+        .basic_auth(&credentials.api_key, Some(&credentials.api_secret))
         .header("Content-Type", "application/json")
         .body(serde_json::to_string(&request_body)?)
         .send()
@@ -207,6 +207,105 @@ pub async fn fetch_rule_labels_batch(
     Ok(labels)
 }
 
+/// Fetch all rule labels from OPNsense API at connection time (no log file required).
+///
+/// Uses POST /api/firewall/filter/searchRule with JSON body. Must include show_all=1 to get
+/// Firewall -> Rules (main ruleset); without it only Automation -> Filter rules are returned (often 0).
+/// Builds id->description from rows. UUID can be in row.uuid or row["@attributes"].uuid.
+/// Paginates if total exceeds rowCount.
+pub async fn fetch_all_rule_labels(
+    credentials: &ApiCredentials,
+) -> Result<HashMap<String, String>> {
+    let client = build_api_client(credentials)?;
+    let base = credentials.endpoint_url.trim_end_matches('/');
+    let url = format!("{}/api/firewall/filter/searchRule", base);
+
+    const ROW_COUNT: i64 = 10_000;
+    let mut all_labels = HashMap::new();
+    let mut current = 1;
+
+    loop {
+        // POST with JSON body. show_all=1 is required to include Firewall -> Rules (not only Automation).
+        let body = serde_json::json!({
+            "current": current,
+            "rowCount": ROW_COUNT,
+            "sort": {},
+            "searchPhrase": "",
+            "show_all": 1
+        });
+
+        let response = client
+            .post(&url)
+            .basic_auth(&credentials.api_key, Some(&credentials.api_secret))
+            .header("Content-Type", "application/json")
+            .body(serde_json::to_string(&body).context("serialize searchRule body")?)
+            .send()
+            .await
+            .context("Failed to fetch rules in fetch_all_rule_labels")?;
+
+        if !response.status().is_success() {
+            if response.status() == 401 {
+                return Err(ApiError::AuthError.into());
+            }
+            return Err(ApiError::NetworkError(format!("HTTP {}", response.status())).into());
+        }
+
+        let json: serde_json::Value = response.json().await
+            .context("Failed to parse searchRule response")?;
+
+        let rows: &[serde_json::Value] = json
+            .get("rows")
+            .and_then(|r| r.as_array())
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        let total: i64 = json.get("total").and_then(|t| t.as_i64()).unwrap_or(0);
+
+        for (i, row) in rows.iter().enumerate() {
+            // OPNsense Filter: descr or description
+            let descr = row.get("descr")
+                .or_else(|| row.get("description"))
+                .and_then(|d| d.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            // Keys: number, id, uuid, sequence; also @attributes.uuid (OPNsense grid)
+            let mut keys: Vec<String> = ["number", "id", "uuid", "sequence"]
+                .iter()
+                .filter_map(|k| {
+                    row.get(*k).and_then(|v| {
+                        v.as_str()
+                            .map(String::from)
+                            .or_else(|| v.as_i64().map(|n| n.to_string()))
+                    })
+                })
+                .filter(|s: &String| !s.is_empty())
+                .collect();
+            if let Some(attr) = row.get("@attributes").and_then(|a| a.get("uuid")).and_then(|u| u.as_str()) {
+                if !attr.is_empty() {
+                    keys.push(attr.to_string());
+                }
+            }
+
+            if keys.is_empty() && i == 0 && total > 0 {
+                let first_keys: Vec<&str> = row.as_object().map(|o| o.keys().map(String::as_str).collect()).unwrap_or_default();
+                warn!("searchRule returned {} rows but no known id in first row. Keys: {:?}", rows.len(), first_keys);
+            }
+
+            for k in keys {
+                all_labels.insert(k, descr.clone());
+            }
+        }
+
+        if (current - 1) * ROW_COUNT + rows.len() as i64 >= total || rows.is_empty() {
+            break;
+        }
+        current += 1;
+    }
+
+    info!("Fetched {} rule labels (all rules) at connection", all_labels.len());
+    Ok(all_labels)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,10 +346,10 @@ async fn fetch_aliases_for_ip(
         "item": ip
     });
 
+    // OPNsense API uses Basic Authentication (not custom headers)
     let response = client
         .post(&url)
-        .header("X-API-Key", &credentials.api_key)
-        .header("X-API-Secret", &credentials.api_secret)
+        .basic_auth(&credentials.api_key, Some(&credentials.api_secret))
         .header("Content-Type", "application/json")
         .body(serde_json::to_string(&request_body)?)
         .send()
@@ -352,6 +451,140 @@ pub async fn fetch_aliases_batch(
     Ok(alias_map)
 }
 
+/// Fetch all aliases from OPNsense API at connection time (no log file required).
+///
+/// Uses GET /api/firewall/alias_util/aliases for the list of names, then
+/// GET /api/firewall/alias_util/list/{name} per alias to get content.
+/// Builds IP → Vec<AliasMapping> so log IPs can be resolved without prior knowledge.
+pub async fn fetch_all_aliases(
+    credentials: &ApiCredentials,
+) -> Result<HashMap<String, Vec<AliasMapping>>> {
+    let client = build_api_client(credentials)?;
+    let base = credentials.endpoint_url.trim_end_matches('/');
+
+    // 1) Get list of alias names
+    let list_url = format!("{}/api/firewall/alias_util/aliases", base);
+    let resp = client
+        .get(&list_url)
+        .basic_auth(&credentials.api_key, Some(&credentials.api_secret))
+        .send()
+        .await
+        .context("Failed to fetch alias list")?;
+
+    if !resp.status().is_success() {
+        if resp.status() == 401 {
+            return Err(ApiError::AuthError.into());
+        }
+        return Err(ApiError::NetworkError(format!("HTTP {}", resp.status())).into());
+    }
+
+    let json: serde_json::Value = resp.json().await
+        .context("Failed to parse alias list")?;
+
+    // alias_util/aliases: {"data":["A","B"]} or {"aliases":["A","B"]} or {"status":"ok","data":[...]}
+    let names: Vec<String> = if let Some(arr) = json.get("data").and_then(|d| d.as_array()) {
+        arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+    } else if let Some(arr) = json.get("aliases").and_then(|a| a.as_array()) {
+        arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+    } else if let Some(obj) = json.get("data").and_then(|d| d.as_object()) {
+        obj.keys().map(String::from).collect()
+    } else if let Some(arr) = json.as_array() {
+        arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+    } else if let Some(arr) = json.get("rows").and_then(|r| r.as_array()) {
+        arr.iter()
+            .filter_map(|r| r.get("name").and_then(|n| n.as_str()).map(String::from))
+            .collect()
+    } else {
+        debug!("alias_util/aliases unexpected format (keys: {:?})", json.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+        return Ok(HashMap::new());
+    };
+
+    if names.is_empty() {
+        info!("No aliases reported by OPNsense, alias cache will be empty");
+        return Ok(HashMap::new());
+    }
+
+    // 2) For each alias, get content and build IP → Vec<AliasMapping>
+    let mut ip_to_aliases: HashMap<String, Vec<AliasMapping>> = HashMap::new();
+
+    for name in names {
+        let path_name = name.replace(' ', "%20");
+        let detail_url = format!("{}/api/firewall/alias_util/list/{}", base, path_name);
+
+        let detail_resp = match client
+            .get(&detail_url)
+            .basic_auth(&credentials.api_key, Some(&credentials.api_secret))
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => r,
+            Ok(r) => {
+                debug!("alias_util/list/{} returned {}", name, r.status());
+                continue;
+            }
+            Err(e) => {
+                warn!("alias_util/list/{} failed: {}", name, e);
+                continue;
+            }
+        };
+
+        let text = match detail_resp.text().await {
+            Ok(t) => t,
+            Err(e) => {
+                warn!("Failed to read alias list body for {}: {}", name, e);
+                continue;
+            }
+        };
+
+        // alias_util/list returns grid JSON: {"total":N,"rows":[{"ip":"1.2.3.4"},...]} per OPNsense API
+        let ips: Vec<String> = if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+            if let Some(rows) = v.get("rows").and_then(|r| r.as_array()) {
+                rows.iter()
+                    .filter_map(|row| {
+                        row.get("ip")
+                            .or_else(|| row.get("address"))
+                            .or_else(|| row.get("content"))
+                            .and_then(|x| x.as_str())
+                            .map(String::from)
+                    })
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            } else if let Some(s) = v.get("content").and_then(|c| c.as_str()) {
+                s.split([',', '\n', ';'])
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            } else if let Some(arr) = v.as_array() {
+                arr.iter().filter_map(|x| x.as_str().map(String::from)).collect()
+            } else {
+                text.split([',', '\n', ';'])
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            }
+        } else {
+            text.split([',', '\n', ';'])
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        };
+
+        let mapping = AliasMapping {
+            alias_name: name.clone(),
+            group_members: ips.clone(),
+            description: None,
+            alias_type: None,
+        };
+
+        for ip in ips {
+            ip_to_aliases.entry(ip).or_default().push(mapping.clone());
+        }
+    }
+
+    info!("Fetched all aliases at connection: {} unique IPs", ip_to_aliases.len());
+    Ok(ip_to_aliases)
+}
+
 // ============================================================================
 // Enrichment Export Helpers (Story 4.1)
 // ============================================================================
@@ -369,10 +602,10 @@ pub async fn fetch_opnsense_version(
 
     debug!("Fetching OPNsense version for export metadata");
 
+    // OPNsense API uses Basic Authentication (not custom headers)
     let response = client
         .get(&url)
-        .header("X-API-Key", &credentials.api_key)
-        .header("X-API-Secret", &credentials.api_secret)
+        .basic_auth(&credentials.api_key, Some(&credentials.api_secret))
         .send()
         .await;
 

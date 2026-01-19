@@ -180,9 +180,9 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
   // Auto-enrich rule labels when entries change (Story 3.3)
   useEffect(() => {
     if (entries.length > 0) {
-      // Debounce enrichment to avoid excessive API calls
       const DEBOUNCE_ENRICHMENT_MS = 500;
       const timeoutId = setTimeout(() => {
+        console.log('[MEM] LogTable: enrichRuleLabels', { entriesCount: entries.length });
         enrichRuleLabels(entries);
       }, DEBOUNCE_ENRICHMENT_MS);
 
@@ -193,9 +193,9 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
   // Auto-enrich IP aliases when entries change (Story 3.4)
   useEffect(() => {
     if (entries.length > 0) {
-      // Debounce enrichment to avoid excessive API calls (same timeout as rules)
       const DEBOUNCE_ENRICHMENT_MS = 500;
       const timeoutId = setTimeout(() => {
+        console.log('[MEM] LogTable: enrichAliases', { entriesCount: entries.length });
         enrichAliases(entries);
       }, DEBOUNCE_ENRICHMENT_MS);
 

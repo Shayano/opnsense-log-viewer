@@ -99,7 +99,7 @@ describe('FileSelector', () => {
       .mockResolvedValueOnce({ size: 1 * 1024 * 1024 * 1024 })
       // 2. load_index_file: no existing index (throws error per Tauri Result pattern)
       .mockRejectedValueOnce('No saved index found for this file')
-      // 3. index_file: successful indexation
+      // 3. build_hybrid_index: successful indexation (populates HYBRID_INDEX)
       .mockResolvedValueOnce({
         sourceFileHash: 'abc123',
         entryCount: 1000,

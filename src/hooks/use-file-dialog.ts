@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { useFileStore } from '@/stores/file-store';
+import { useQueryStore } from '@/stores/query-store';
 import type { FileMetadata, IndexMetadata } from '@/types/file';
 import { toast } from '@/components/base/toaster';
 
@@ -21,6 +22,7 @@ export function useFileDialog() {
   const setLoading = useFileStore((state) => state.setLoading);
   const setError = useFileStore((state) => state.setError);
   const setIndexMetadata = useFileStore((state) => state.setIndexMetadata);
+  const clearResult = useQueryStore((state) => state.clearResult);
 
   /**
    * Open the native OS file picker
@@ -91,6 +93,8 @@ export function useFileDialog() {
    */
   const startIndexation = async (filePath: string, fileSize: number) => {
     setLoading(true);
+    console.log('[MEM] use-file-dialog startIndexation: calling clearResult', { filePath });
+    clearResult(); // Free previous result and avoid showing stale data from another file
     setCurrentFile({
       path: filePath,
       size: fileSize,
@@ -148,12 +152,15 @@ export function useFileDialog() {
 
   /**
    * Perform actual indexation (new index creation)
+   *
+   * Uses build_hybrid_index (not index_file) so that HYBRID_INDEX is populated
+   * and execute_query / get_entries_by_ids work. index_file only parses and
+   * returns metadata; it does not build the index or persist to .idx.
    */
   const performIndexation = async (filePath: string) => {
     try {
-      const metadata = await invoke<IndexMetadata>('index_file', {
+      const metadata = await invoke<IndexMetadata>('build_hybrid_index', {
         filePath,
-        compressionLevel: 1, // Architectural decision: Zstd level 1
       });
 
       setIndexMetadata(metadata);

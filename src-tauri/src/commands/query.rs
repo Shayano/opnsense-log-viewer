@@ -1,8 +1,28 @@
 use crate::indexer::HybridIndex;
+use crate::parser::parse_file_collect_matching;
 use crate::query::executor::QueryExecutor;
 use crate::query::types::{QueryError, QueryRequest, QueryResult};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use log::info;
+
+/// DTO for frontend LogEntry (matches src/types/log-entry.ts)
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogEntryDto {
+    pub id: String,
+    pub timestamp: String,
+    pub interface: String,
+    pub source_ip: String,
+    pub source_port: u16,
+    pub destination_ip: String,
+    pub destination_port: u16,
+    pub protocol: String,
+    pub action: String,
+    pub rule_label: String,
+}
+
+const MAX_ENTRIES_PER_FETCH: usize = 20_000;
 
 lazy_static::lazy_static! {
     /// Global state for the hybrid index (shared with indexation commands)
@@ -68,8 +88,91 @@ pub async fn execute_query(request: QueryRequest) -> Result<QueryResult, String>
         result.matched_count,
         result.execution_time_ms
     );
+    log::info!(
+        "[MEM] execute_query: entry_ids.len()={} matched_count={} total_count={} (entry_ids sent to frontend)",
+        result.entry_ids.len(),
+        result.matched_count,
+        result.total_count
+    );
 
     Ok(result)
+}
+
+/// Fetch full log entries by IDs for display in LogTable
+///
+/// Streams the source file line-by-line and collects only entries whose id is in
+/// the requested set. Does not load the entire file into memory. Limited to
+/// MAX_ENTRIES_PER_FETCH to avoid timeouts on large result sets.
+#[tauri::command]
+pub async fn get_entries_by_ids(entry_ids: Vec<u64>) -> Result<Vec<LogEntryDto>, String> {
+    let requested = entry_ids.len();
+    let id_set: HashSet<u64> = entry_ids
+        .into_iter()
+        .take(MAX_ENTRIES_PER_FETCH)
+        .collect();
+
+    log::info!(
+        "[MEM] get_entries_by_ids: request_ids={} id_set={}",
+        requested,
+        id_set.len()
+    );
+
+    if id_set.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let (path, format) = {
+        let index_guard = HYBRID_INDEX
+            .lock()
+            .map_err(|e| format!("Failed to lock index: {}", e))?;
+
+        let hybrid = index_guard
+            .as_ref()
+            .ok_or_else(|| "Index not loaded. Please open a log file first.".to_string())?;
+
+        let meta = hybrid
+            .metadata()
+            .ok_or_else(|| "Index has no metadata (source path unknown).".to_string())?;
+
+        (meta.source_file_path.clone(), meta.format)
+    };
+
+    let dtos = tokio::task::spawn_blocking(move || {
+        let entries = parse_file_collect_matching(&path, format, &id_set, MAX_ENTRIES_PER_FETCH)
+            .map_err(|e| format!("Failed to parse log file: {}", e))?;
+
+        let result: Vec<LogEntryDto> = entries
+            .into_iter()
+            .map(|entry| LogEntryDto {
+                id: entry.id.to_string(),
+                timestamp: entry.timestamp.to_rfc3339(),
+                interface: entry.interface.unwrap_or_default(),
+                source_ip: entry.source_ip.unwrap_or_default(),
+                source_port: entry.source_port.unwrap_or(0),
+                destination_ip: entry.dest_ip.unwrap_or_default(),
+                destination_port: entry.dest_port.unwrap_or(0),
+                protocol: entry
+                    .protocol
+                    .unwrap_or_else(|| "unknown".to_string())
+                    .to_lowercase(),
+                action: entry
+                    .action
+                    .unwrap_or_else(|| "pass".to_string())
+                    .to_lowercase(),
+                rule_label: entry.rule_label.unwrap_or_default(),
+            })
+            .collect();
+        Ok::<_, String>(result)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))??;
+
+    info!("Fetched {} entries for display", dtos.len());
+    log::info!(
+        "[MEM] get_entries_by_ids: done result_len={} (sent to frontend as Vec<LogEntryDto>)",
+        dtos.len()
+    );
+    Ok(dtos)
 }
 
 /// Set the global hybrid index (called after indexation completes)
@@ -82,6 +185,11 @@ pub fn set_hybrid_index(index: HybridIndex) -> Result<(), String> {
         .lock()
         .map_err(|e| format!("Failed to lock index: {}", e))?;
 
+    let mem = index.memory_usage();
+    log::info!(
+        "[MEM] set_hybrid_index: replacing HYBRID_INDEX, new index memory_usage≈{} bytes",
+        mem
+    );
     *index_guard = Some(index);
     Ok(())
 }
@@ -93,6 +201,11 @@ pub fn clear_hybrid_index() -> Result<(), String> {
         .lock()
         .map_err(|e| format!("Failed to lock index: {}", e))?;
 
+    let prev_mem = index_guard.as_ref().map(|i| i.memory_usage()).unwrap_or(0);
+    log::info!(
+        "[MEM] clear_hybrid_index: dropping HYBRID_INDEX, was≈{} bytes",
+        prev_mem
+    );
     *index_guard = None;
     Ok(())
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { ChevronLeft, ChevronRight, Filter as FilterIcon, Search, Loader2, Save } from 'lucide-react';
 import { useFilterStore } from '@/stores/filter-store';
 import { useQueryStore } from '@/stores/query-store';
@@ -11,6 +12,8 @@ import { SaveFilterModal } from './save-filter-modal';
 import { executeQuery } from '@/utils/query-client';
 import toast from 'react-hot-toast';
 import type { Filter } from '@/types/filter';
+import type { LogEntry } from '@/types/log-entry';
+import { Action, Protocol } from '@/types/log-entry';
 
 export function FilterSidebar(): JSX.Element {
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -22,7 +25,8 @@ export function FilterSidebar(): JSX.Element {
   const draftMode = useFilterStore((state) => state.draftMode);
   const setDraftMode = useFilterStore((state) => state.setDraftMode);
 
-  const { setResult, setExecuting, setError, isExecuting } = useQueryStore();
+  const { setResult, setCurrentEntries, setEntriesLoading, setExecuting, setError, isExecuting } =
+    useQueryStore();
   const { addSearchToHistory } = useSearchHistoryStore();
 
   // Persist collapsed state in localStorage
@@ -68,6 +72,11 @@ export function FilterSidebar(): JSX.Element {
       // Get index hash from global state (placeholder for now)
       const indexHash = '';
       const result = await executeQuery(filters, indexHash);
+      console.log('[MEM] filter-sidebar: executeQuery returned', {
+        entryIdsCount: result.entryIds?.length ?? 0,
+        matchedCount: result.matchedCount,
+        totalCount: result.totalCount,
+      });
       setResult(result);
 
       toast.success(
@@ -82,6 +91,51 @@ export function FilterSidebar(): JSX.Element {
         executionTimeMs: result.executionTimeMs,
         sourceFileHash: undefined, // TODO: Get from file store if available
       });
+
+      // Fetch entries for LogTable (enables rule label and alias enrichment)
+      if (result.matchedCount === 0) {
+        setCurrentEntries([]);
+        setEntriesLoading(false);
+      } else {
+        setEntriesLoading(true);
+        try {
+          const ids = result.entryIds.slice(0, 20_000);
+          console.log('[MEM] filter-sidebar: invoking get_entries_by_ids', { idsCount: ids.length });
+          const dtos = await invoke<Array<{
+            id: string;
+            timestamp: string;
+            interface: string;
+            sourceIp: string;
+            sourcePort: number;
+            destinationIp: string;
+            destinationPort: number;
+            protocol: string;
+            action: string;
+            ruleLabel: string;
+          }>>('get_entries_by_ids', { entry_ids: ids });
+          const entries: LogEntry[] = dtos.map((d) => ({
+            id: d.id,
+            timestamp: d.timestamp,
+            interface: d.interface,
+            sourceIp: d.sourceIp,
+            sourcePort: d.sourcePort,
+            destinationIp: d.destinationIp,
+            destinationPort: d.destinationPort,
+            protocol: (d.protocol as Protocol) || Protocol.UNKNOWN,
+            action: (d.action as Action) || Action.PASS,
+            ruleLabel: d.ruleLabel,
+          }));
+          console.log('[MEM] filter-sidebar: get_entries_by_ids returned, setting entries', {
+            entriesCount: entries.length,
+          });
+          setCurrentEntries(entries);
+        } catch (fetchErr) {
+          setCurrentEntries([]);
+          toast.error(`Could not load entries: ${fetchErr}`);
+        } finally {
+          setEntriesLoading(false);
+        }
+      }
     } catch (error) {
       setError(String(error));
       toast.error(String(error));

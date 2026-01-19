@@ -36,9 +36,11 @@ export async function enrichRuleLabels(entries: LogEntry[]): Promise<void> {
     });
 
     // Update store
+    const keyCount = Object.keys(labels).length;
+    console.log('[MEM] enrichment-service setRuleLabels', { keyCount });
     useEnrichmentStore.getState().setRuleLabels(labels);
 
-    const foundCount = Object.keys(labels).length;
+    const foundCount = keyCount;
     const notFoundCount = hashArray.length - foundCount;
 
     // Success toast
@@ -117,9 +119,11 @@ export async function enrichAliases(entries: LogEntry[]): Promise<void> {
     });
 
     // Update store
+    const keyCount = Object.keys(aliases).length;
+    console.log('[MEM] enrichment-service setAliases', { keyCount });
     useEnrichmentStore.getState().setAliases(aliases);
 
-    const aliasedCount = Object.keys(aliases).length;
+    const aliasedCount = keyCount;
     const notAliasedCount = ipArray.length - aliasedCount;
 
     // Success toast
