@@ -309,3 +309,94 @@ pub struct ImportResult {
     /// Age in days
     pub age_days: i64,
 }
+
+// ============================================================================
+// Staleness Indicator Types (Story 4.3)
+// ============================================================================
+
+/// Staleness threshold constant (from Story 4.2)
+pub const ENRICHMENT_STALENESS_THRESHOLD_DAYS: i64 = 7;
+
+/// Severity level for backup enrichment age
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StalenessSeverity {
+    /// Fresh enrichment (<24 hours old)
+    Fresh,
+
+    /// Moderately stale (1-7 days old)
+    Moderate,
+
+    /// Highly stale (>7 days old) - verify accuracy
+    High,
+}
+
+impl StalenessSeverity {
+    /// Calculate severity based on age in days
+    pub fn from_age_days(age_days: i64) -> Self {
+        if age_days < 1 {
+            Self::Fresh
+        } else if age_days <= ENRICHMENT_STALENESS_THRESHOLD_DAYS {
+            Self::Moderate
+        } else {
+            Self::High
+        }
+    }
+
+    /// Get background color class for Tailwind CSS
+    pub fn background_color(&self) -> &'static str {
+        match self {
+            Self::Fresh => "bg-yellow-100 dark:bg-yellow-900/20",
+            Self::Moderate => "bg-amber-100 dark:bg-amber-900/30",
+            Self::High => "bg-orange-100 dark:bg-orange-900/40",
+        }
+    }
+
+    /// Get text color class for Tailwind CSS
+    pub fn text_color(&self) -> &'static str {
+        match self {
+            Self::Fresh => "text-yellow-800 dark:text-yellow-200",
+            Self::Moderate => "text-amber-800 dark:text-amber-200",
+            Self::High => "text-orange-800 dark:text-orange-200",
+        }
+    }
+}
+
+/// Result of API reconnection attempt
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionResult {
+    /// Whether connection succeeded
+    pub connected: bool,
+
+    /// OPNsense version if connected
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opnsense_version: Option<String>,
+
+    /// Error message if connection failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+
+    /// Number of interfaces fetched (if connected)
+    pub interfaces_count: usize,
+
+    /// Number of rules fetched (if connected)
+    pub rules_count: usize,
+
+    /// Number of aliases fetched (if connected)
+    pub aliases_count: usize,
+}
+
+/// Event payload for API reconnection detection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiReconnectedEvent {
+    /// Current API status
+    pub api_status: String,
+
+    /// Whether backup enrichment is active
+    pub backup_active: bool,
+
+    /// Timestamp of reconnection
+    pub reconnected_at: DateTime<Utc>,
+}

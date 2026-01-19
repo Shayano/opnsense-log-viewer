@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, Utc};
 use log::debug;
 
-use crate::api_client::types::{AliasCache, AliasMapping, ConnectionInfo, ConnectionStatus, InterfaceMappingCache, RuleLabelCache};
+use crate::api_client::types::{AliasCache, AliasMapping, ApiCredentials, ConnectionInfo, ConnectionStatus, ExportMetadata, InterfaceMappingCache, RuleLabelCache};
 
 /// Thread-safe in-memory cache for interface mappings, rule labels, and IP aliases
 #[derive(Clone)]
@@ -19,6 +19,12 @@ pub struct EnrichmentCacheState {
     connection_status: Arc<Mutex<ConnectionStatus>>,
     last_error: Arc<Mutex<Option<String>>>,
     last_api_check: Arc<Mutex<DateTime<Utc>>>,
+    // Backup enrichment tracking (Story 4.2 + 4.3)
+    backup_metadata: Arc<Mutex<Option<ExportMetadata>>>,
+    // Staleness indicator state (Story 4.3)
+    staleness_indicator_dismissed: Arc<Mutex<bool>>,
+    // API credentials for reconnection (Story 4.3)
+    api_credentials: Arc<Mutex<Option<ApiCredentials>>>,
 }
 
 impl EnrichmentCacheState {
@@ -34,6 +40,10 @@ impl EnrichmentCacheState {
             connection_status: Arc::new(Mutex::new(ConnectionStatus::Disconnected)),
             last_error: Arc::new(Mutex::new(None)),
             last_api_check: Arc::new(Mutex::new(Utc::now())),
+            // Initialize backup enrichment state
+            backup_metadata: Arc::new(Mutex::new(None)),
+            staleness_indicator_dismissed: Arc::new(Mutex::new(false)),
+            api_credentials: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -238,6 +248,76 @@ impl EnrichmentCacheState {
     /// Check if API is currently connected
     pub fn is_connected(&self) -> bool {
         *self.connection_status.lock().unwrap() == ConnectionStatus::Connected
+    }
+
+    // ============================================================================
+    // Backup Enrichment Methods (Story 4.2 + 4.3)
+    // ============================================================================
+
+    /// Set backup metadata when importing enrichment
+    pub fn set_backup_metadata(&self, metadata: ExportMetadata) {
+        let mut backup_lock = self.backup_metadata.lock().unwrap();
+        *backup_lock = Some(metadata);
+        debug!("Backup metadata stored");
+    }
+
+    /// Get backup metadata
+    pub fn get_backup_metadata(&self) -> Option<ExportMetadata> {
+        let backup_lock = self.backup_metadata.lock().unwrap();
+        backup_lock.clone()
+    }
+
+    /// Clear backup metadata (when switching to live API or clearing backup)
+    pub fn clear_backup_metadata(&self) {
+        let mut backup_lock = self.backup_metadata.lock().unwrap();
+        *backup_lock = None;
+
+        // Also reset staleness dismissed state
+        let mut dismissed_lock = self.staleness_indicator_dismissed.lock().unwrap();
+        *dismissed_lock = false;
+
+        debug!("Backup metadata cleared");
+    }
+
+    // ============================================================================
+    // Staleness Indicator Methods (Story 4.3)
+    // ============================================================================
+
+    /// Set staleness indicator dismissed state (session-scoped only)
+    pub fn set_staleness_dismissed(&self, dismissed: bool) {
+        let mut dismissed_lock = self.staleness_indicator_dismissed.lock().unwrap();
+        *dismissed_lock = dismissed;
+        debug!("Staleness indicator dismissed: {}", dismissed);
+    }
+
+    /// Get staleness indicator dismissed state
+    pub fn get_staleness_dismissed(&self) -> bool {
+        let dismissed_lock = self.staleness_indicator_dismissed.lock().unwrap();
+        *dismissed_lock
+    }
+
+    // ============================================================================
+    // API Credentials Methods (Story 4.3)
+    // ============================================================================
+
+    /// Store API credentials for reconnection
+    pub fn set_credentials(&self, credentials: ApiCredentials) {
+        let mut creds_lock = self.api_credentials.lock().unwrap();
+        *creds_lock = Some(credentials);
+        debug!("API credentials stored for reconnection");
+    }
+
+    /// Get API credentials
+    pub fn get_credentials(&self) -> Option<ApiCredentials> {
+        let creds_lock = self.api_credentials.lock().unwrap();
+        creds_lock.clone()
+    }
+
+    /// Clear API credentials
+    pub fn clear_credentials(&self) {
+        let mut creds_lock = self.api_credentials.lock().unwrap();
+        *creds_lock = None;
+        debug!("API credentials cleared");
     }
 }
 

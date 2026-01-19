@@ -79,6 +79,13 @@ interface EnrichmentStore {
   // Backup enrichment actions
   setBackupEnrichment: (metadata: BackupMetadata) => void;
   clearBackupEnrichment: () => void;
+
+  // Staleness indicator (Story 4.3)
+  stalenessIndicatorDismissed: boolean;
+
+  // Staleness indicator actions
+  setStalenessIndicatorDismissed: (dismissed: boolean) => void;
+  getStalenessIndicatorDismissed: () => boolean;
 }
 
 export const useEnrichmentStore = create<EnrichmentStore>((set, get) => ({
@@ -247,6 +254,25 @@ export const useEnrichmentStore = create<EnrichmentStore>((set, get) => ({
     set({
       backupEnrichmentActive: false,
       backupMetadata: null,
+      stalenessIndicatorDismissed: false, // Reset dismissed state
     });
+  },
+
+  // ============================================================================
+  // Staleness Indicator (Story 4.3)
+  // ============================================================================
+
+  // Initial staleness indicator state
+  stalenessIndicatorDismissed: false,
+
+  // Set staleness indicator dismissed state
+  setStalenessIndicatorDismissed: (dismissed) => {
+    set({ stalenessIndicatorDismissed: dismissed });
+  },
+
+  // Get staleness indicator dismissed state
+  getStalenessIndicatorDismissed: () => {
+    const { stalenessIndicatorDismissed } = get();
+    return stalenessIndicatorDismissed;
   },
 }));

@@ -10,6 +10,8 @@ import { FilterSidebar } from './components/filter-sidebar';
 import { SettingsDialog } from './components/settings-dialog';
 import { OfflineBanner } from './components/api-status/offline-banner';
 import { ConnectionIndicator } from './components/api-status/connection-indicator';
+import { StalenessIndicator, MinimizedStalenessIcon } from './components/enrichment';
+import { ApiReconnectedPrompt } from './components/dialogs/api-reconnected-prompt';
 import { loadApiCredentials, testApiConnection } from './utils/api-client';
 import { useEnrichmentStore } from './stores/enrichment-store';
 import { loadCachedRuleLabels } from './services/enrichment-service';
@@ -125,6 +127,10 @@ function App() {
       <Toaster />
       {/* Story 3.5: Offline Banner */}
       <OfflineBanner />
+      {/* Story 4.3: Staleness Indicators */}
+      <StalenessIndicator />
+      <MinimizedStalenessIcon />
+      <ApiReconnectedPrompt />
 
       <header className="border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex-shrink-0">
         <div className="flex items-center justify-between">

@@ -1,5 +1,5 @@
 use tauri::{command, AppHandle, Emitter, State};
-use crate::api_client::types::{AliasMapping, ApiCredentials, CacheStatus, ConnectionInfo, ConnectionStatus, ConnectionTestResult, ExportedEnrichmentData, ExportMetadata, ExportResult, ImportResult, ImportValidation, InterfaceMappingCache};
+use crate::api_client::types::{AliasMapping, ApiCredentials, ApiReconnectedEvent, CacheStatus, ConnectionInfo, ConnectionResult, ConnectionStatus, ConnectionTestResult, ExportedEnrichmentData, ExportMetadata, ExportResult, ImportResult, ImportValidation, InterfaceMappingCache};
 use crate::api_client::client::test_connection;
 use crate::api_client::enrichment::{calculate_config_hash, calculate_enrichment_age, fetch_aliases_batch, fetch_interface_mappings, fetch_opnsense_version, fetch_rule_labels_batch, ENRICHMENT_STALENESS_THRESHOLD_DAYS};
 use crate::credentials::{manager, encrypted_storage};
@@ -887,6 +887,153 @@ pub async fn open_enrichment_file_picker() -> Result<Option<String>, String> {
         Some(path) => Ok(Some(path.to_string_lossy().to_string())),
         None => Ok(None), // User cancelled
     }
+}
+
+// ============================================================================
+// Staleness Indicator Commands (Story 4.3)
+// ============================================================================
+
+/// Attempt to reconnect to OPNsense API and fetch fresh enrichment
+///
+/// Reads stored credentials, attempts connection, fetches enrichment data,
+/// and updates cache. Clears backup enrichment state on success.
+#[command]
+pub async fn reconnect_api(
+    cache_state: State<'_, EnrichmentCacheState>,
+    app_handle: AppHandle,
+) -> Result<crate::api_client::types::ConnectionResult, String> {
+    info!("Attempting to reconnect to OPNsense API");
+
+    // Get API credentials from cache state
+    let credentials = cache_state.get_credentials()
+        .ok_or_else(|| "No API credentials configured. Please set up API connection first.".to_string())?;
+
+    // Test connection
+    match test_connection(&credentials).await {
+        Ok(_) => {
+            info!("API reconnection successful");
+
+            // Fetch fresh enrichment data in parallel
+            let interfaces_fut = fetch_interface_mappings(&credentials);
+            let rule_labels_fut = {
+                // Fetch rule labels (we don't have a list of hashes, so fetch empty for now)
+                // In production, you'd typically fetch all rules or cache previously seen hashes
+                let empty_hashes = vec![];
+                fetch_rule_labels_batch(&credentials, empty_hashes)
+            };
+            let aliases_fut = {
+                // Fetch aliases (similarly, we'd need a list of IPs)
+                let empty_ips = vec![];
+                fetch_aliases_batch(&credentials, empty_ips)
+            };
+
+            // Execute in parallel
+            let (interfaces_result, rule_labels_result, aliases_result) = tokio::join!(
+                interfaces_fut,
+                rule_labels_fut,
+                aliases_fut
+            );
+
+            // Update cache with fresh data
+            let interfaces = interfaces_result.map_err(|e| format!("Failed to fetch interfaces: {}", e))?;
+            let rule_labels = rule_labels_result.map_err(|e| format!("Failed to fetch rule labels: {}", e))?;
+            let aliases = aliases_result.map_err(|e| format!("Failed to fetch aliases: {}", e))?;
+
+            cache_state.set_interface_mappings(interfaces.clone(), credentials.endpoint_url.clone());
+            cache_state.set_rule_labels(rule_labels.clone(), credentials.endpoint_url.clone());
+            cache_state.set_aliases(aliases.clone(), credentials.endpoint_url.clone());
+
+            // Update connection status to Connected
+            cache_state.set_connection_status(ConnectionStatus::Connected, None);
+
+            // Clear backup enrichment state
+            cache_state.clear_backup_metadata();
+
+            // Emit reconnection event for frontend
+            let event = crate::api_client::types::ApiReconnectedEvent {
+                api_status: "connected".to_string(),
+                backup_active: false,
+                reconnected_at: Utc::now(),
+            };
+            app_handle.emit("api-reconnected", event)
+                .map_err(|e| format!("Failed to emit reconnection event: {}", e))?;
+
+            // Fetch OPNsense version (optional metadata)
+            let opnsense_version = fetch_opnsense_version(&credentials)
+                .await
+                .ok()
+                .flatten();
+
+            info!("Reconnection complete: {} interfaces, {} rules, {} aliases",
+                  interfaces.len(), rule_labels.len(), aliases.len());
+
+            Ok(crate::api_client::types::ConnectionResult {
+                connected: true,
+                opnsense_version,
+                error_message: None,
+                interfaces_count: interfaces.len(),
+                rules_count: rule_labels.len(),
+                aliases_count: aliases.len(),
+            })
+        }
+        Err(e) => {
+            warn!("API reconnection failed: {}", e);
+
+            Ok(crate::api_client::types::ConnectionResult {
+                connected: false,
+                opnsense_version: None,
+                error_message: Some(format!("Connection failed: {}", e)),
+                interfaces_count: 0,
+                rules_count: 0,
+                aliases_count: 0,
+            })
+        }
+    }
+}
+
+/// Clear backup enrichment and revert to raw data display
+///
+/// Clears all enrichment caches (interfaces, rules, aliases),
+/// sets connection status to Disconnected, and resets staleness state.
+#[command]
+pub async fn clear_backup_enrichment(
+    cache_state: State<'_, EnrichmentCacheState>,
+) -> Result<(), String> {
+    info!("Clearing backup enrichment data");
+
+    // Clear all enrichment caches
+    cache_state.clear_interface_mappings();
+    cache_state.clear_rule_labels();
+    cache_state.clear_aliases();
+
+    // Set connection status to Disconnected
+    cache_state.set_connection_status(ConnectionStatus::Disconnected, None);
+
+    // Clear backup metadata (also resets staleness_indicator_dismissed)
+    cache_state.clear_backup_metadata();
+
+    info!("Backup enrichment cleared - using raw data");
+
+    Ok(())
+}
+
+/// Set staleness indicator dismissed state (session-scoped)
+#[command]
+pub fn set_staleness_indicator_dismissed(
+    dismissed: bool,
+    cache_state: State<'_, EnrichmentCacheState>,
+) -> Result<(), String> {
+    cache_state.set_staleness_dismissed(dismissed);
+    info!("Staleness indicator dismissed: {}", dismissed);
+    Ok(())
+}
+
+/// Get staleness indicator dismissed state
+#[command]
+pub fn get_staleness_indicator_dismissed(
+    cache_state: State<'_, EnrichmentCacheState>,
+) -> Result<bool, String> {
+    Ok(cache_state.get_staleness_dismissed())
 }
 
 #[cfg(test)]

@@ -104,6 +104,11 @@ pub fn run() {
             api_client::commands::validate_enrichment_import,
             api_client::commands::import_enrichment_data,
             api_client::commands::open_enrichment_file_picker,
+            // Story 4.3: Staleness Indicators
+            api_client::commands::reconnect_api,
+            api_client::commands::clear_backup_enrichment,
+            api_client::commands::set_staleness_indicator_dismissed,
+            api_client::commands::get_staleness_indicator_dismissed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

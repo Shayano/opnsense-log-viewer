@@ -8,7 +8,8 @@ use log::{debug, info, warn, error};
 use crate::api_client::client::build_api_client;
 use crate::api_client::types::{
     AliasMapping, AliasSearchResponse, ApiCredentials, ApiError,
-    InterfaceMappingResponse, RuleLabelResponse
+    InterfaceMappingResponse, RuleLabelResponse, StalenessSeverity,
+    ENRICHMENT_STALENESS_THRESHOLD_DAYS as STALENESS_THRESHOLD
 };
 
 /// Fetch interface name mappings from OPNsense API
@@ -541,5 +542,105 @@ mod import_tests {
         let future = Utc::now() + Duration::days(5);
         let age = calculate_enrichment_age(&future).unwrap();
         assert!(age < 0, "Future timestamp should return negative age");
+    }
+}
+
+// ============================================================================
+// Staleness Severity Helpers (Story 4.3)
+// ============================================================================
+
+/// Calculate staleness severity based on enrichment age
+pub fn calculate_staleness_severity(export_timestamp: &chrono::DateTime<chrono::Utc>) -> Result<StalenessSeverity> {
+    let age_days = calculate_enrichment_age(export_timestamp)?;
+    Ok(StalenessSeverity::from_age_days(age_days))
+}
+
+/// Format age for display (e.g., "2 days, 5 hours" or "12 hours")
+pub fn format_enrichment_age(export_timestamp: &chrono::DateTime<chrono::Utc>) -> Result<String> {
+    let now = chrono::Utc::now();
+    let duration = now.signed_duration_since(*export_timestamp);
+
+    let days = duration.num_days();
+    let hours = duration.num_hours() % 24;
+
+    if days > 0 {
+        let day_str = if days == 1 { "day" } else { "days" };
+        if hours > 0 {
+            Ok(format!("{} {}, {} hours", days, day_str, hours))
+        } else {
+            Ok(format!("{} {}", days, day_str))
+        }
+    } else {
+        let hour_str = if hours == 1 { "hour" } else { "hours" };
+        Ok(format!("{} {}", hours.max(0), hour_str))
+    }
+}
+
+#[cfg(test)]
+mod staleness_tests {
+    use super::*;
+    use chrono::{Duration, Utc};
+
+    #[test]
+    fn test_staleness_severity_fresh() {
+        let recent = Utc::now() - Duration::hours(12);
+        let severity = calculate_staleness_severity(&recent).unwrap();
+        assert_eq!(severity, StalenessSeverity::Fresh);
+    }
+
+    #[test]
+    fn test_staleness_severity_moderate() {
+        let moderate = Utc::now() - Duration::days(3);
+        let severity = calculate_staleness_severity(&moderate).unwrap();
+        assert_eq!(severity, StalenessSeverity::Moderate);
+    }
+
+    #[test]
+    fn test_staleness_severity_high() {
+        let old = Utc::now() - Duration::days(10);
+        let severity = calculate_staleness_severity(&old).unwrap();
+        assert_eq!(severity, StalenessSeverity::High);
+    }
+
+    #[test]
+    fn test_staleness_severity_boundary_1day() {
+        let exactly_1d = Utc::now() - Duration::days(1);
+        let severity = calculate_staleness_severity(&exactly_1d).unwrap();
+        assert_eq!(severity, StalenessSeverity::Moderate);
+    }
+
+    #[test]
+    fn test_staleness_severity_boundary_7days() {
+        let exactly_7d = Utc::now() - Duration::days(7);
+        let severity = calculate_staleness_severity(&exactly_7d).unwrap();
+        assert_eq!(severity, StalenessSeverity::Moderate);
+    }
+
+    #[test]
+    fn test_format_enrichment_age_hours() {
+        let recent = Utc::now() - Duration::hours(5);
+        let formatted = format_enrichment_age(&recent).unwrap();
+        assert_eq!(formatted, "5 hours");
+    }
+
+    #[test]
+    fn test_format_enrichment_age_days() {
+        let old = Utc::now() - Duration::days(2) - Duration::hours(3);
+        let formatted = format_enrichment_age(&old).unwrap();
+        assert_eq!(formatted, "2 days, 3 hours");
+    }
+
+    #[test]
+    fn test_format_enrichment_age_singular() {
+        let one_day = Utc::now() - Duration::days(1);
+        let formatted = format_enrichment_age(&one_day).unwrap();
+        assert_eq!(formatted, "1 day");
+    }
+
+    #[test]
+    fn test_format_enrichment_age_singular_hour() {
+        let one_hour = Utc::now() - Duration::hours(1);
+        let formatted = format_enrichment_age(&one_hour).unwrap();
+        assert_eq!(formatted, "1 hour");
     }
 }
