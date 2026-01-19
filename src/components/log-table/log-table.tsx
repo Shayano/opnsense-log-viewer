@@ -6,7 +6,7 @@ import { LogTableRow } from './log-table-row';
 import { ContextMenu } from './context-menu';
 import { useResponsiveColumns } from './use-responsive-columns';
 import { EntryDetailView } from '@/components/entry-detail-view';
-import { enrichRuleLabels } from '@/services/enrichment-service';
+import { enrichRuleLabels, enrichAliases } from '@/services/enrichment-service';
 
 interface LogTableProps {
   entries: LogEntry[];
@@ -184,6 +184,19 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
       const DEBOUNCE_ENRICHMENT_MS = 500;
       const timeoutId = setTimeout(() => {
         enrichRuleLabels(entries);
+      }, DEBOUNCE_ENRICHMENT_MS);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [entries]);
+
+  // Auto-enrich IP aliases when entries change (Story 3.4)
+  useEffect(() => {
+    if (entries.length > 0) {
+      // Debounce enrichment to avoid excessive API calls (same timeout as rules)
+      const DEBOUNCE_ENRICHMENT_MS = 500;
+      const timeoutId = setTimeout(() => {
+        enrichAliases(entries);
       }, DEBOUNCE_ENRICHMENT_MS);
 
       return () => clearTimeout(timeoutId);

@@ -5,6 +5,7 @@ import type { LogEntry } from '@/types/log-entry';
 import { getActionStyle } from '@/utils/action-colors';
 import { useInterfaceName } from '@/hooks/use-interface-name';
 import { useRuleLabel } from '@/hooks/use-rule-label';
+import { useIPAlias } from '@/hooks/use-ip-alias';
 import type { ColumnVisibility } from './use-responsive-columns';
 
 // Helper to compute grid template columns from visibility
@@ -51,6 +52,10 @@ export const LogTableRow = memo(function LogTableRow({
   const { displayText: ruleLabelDisplayText, tooltipText: ruleLabelTooltip } = useRuleLabel(
     entry.ruleLabel
   );
+
+  // Resolve IP aliases (source and destination)
+  const { displayText: sourceIpDisplay, tooltipText: sourceIpTooltip } = useIPAlias(entry.sourceIp);
+  const { displayText: destIpDisplay, tooltipText: destIpTooltip } = useIPAlias(entry.destinationIp);
 
   // Memoize grid template columns to avoid recalculating on every render
   const gridTemplateColumns = useMemo(
@@ -111,8 +116,8 @@ export const LogTableRow = memo(function LogTableRow({
       )}
 
       {columnVisibility.sourceIp && (
-        <div className="font-mono truncate leading-tight" title={entry.sourceIp} role="gridcell">
-          {entry.sourceIp}
+        <div className="font-mono truncate leading-tight" title={sourceIpTooltip} role="gridcell">
+          {sourceIpDisplay}
         </div>
       )}
 
@@ -129,10 +134,10 @@ export const LogTableRow = memo(function LogTableRow({
       {columnVisibility.destinationIp && (
         <div
           className="font-mono truncate leading-tight"
-          title={entry.destinationIp}
+          title={destIpTooltip}
           role="gridcell"
         >
-          {entry.destinationIp}
+          {destIpDisplay}
         </div>
       )}
 

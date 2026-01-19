@@ -24,6 +24,8 @@ export function ValueInput({ fieldType, operatorType, value, onChange, error }: 
   const interfaceMappings = useEnrichmentStore((state) => state.interfaceMappings);
   // Get rule labels from enrichment store (Story 3.3)
   const ruleLabels = useEnrichmentStore((state) => state.ruleLabels);
+  // Get IP aliases from enrichment store (Story 3.4)
+  const aliases = useEnrichmentStore((state) => state.aliases);
 
   // Interface dropdown with logical names
   if (fieldType === 'interface') {
@@ -339,11 +341,56 @@ export function ValueInput({ fieldType, operatorType, value, onChange, error }: 
     );
   }
 
-  // Text input for IPs and other text fields (Interface and Rule Label are handled above)
+  // IP address input with alias autocomplete (Story 3.4)
+  if (fieldType === 'sourceIp' || fieldType === 'destinationIp') {
+    // Extract all unique IPs and alias names for autocomplete
+    const ipAutocompleteOptions: { ip: string; aliasName?: string }[] = [];
+
+    // Add all aliased IPs
+    aliases.forEach((aliasList, ip) => {
+      aliasList.forEach((alias) => {
+        ipAutocompleteOptions.push({ ip, aliasName: alias.aliasName });
+      });
+    });
+
+    return (
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          3. Enter IP Address
+        </label>
+        <input
+          type="text"
+          value={(value as string) || ''}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="e.g., 192.168.1.1 or 10.0.0.0/24"
+          list="ip-autocomplete"
+          className="w-full px-3 py-2 bg-white dark:bg-gray-800
+            border border-gray-300 dark:border-gray-700 rounded
+            text-gray-900 dark:text-gray-100 font-mono text-sm
+            focus:ring-2 focus:ring-blue-500"
+          aria-label="IP address"
+        />
+        <datalist id="ip-autocomplete">
+          {ipAutocompleteOptions.map((option, index) => (
+            <option
+              key={`${option.ip}-${index}`}
+              value={option.ip}
+              label={option.aliasName || option.ip}
+            />
+          ))}
+        </datalist>
+        {error && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
+        {ipAutocompleteOptions.length > 0 && (
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {ipAutocompleteOptions.length} aliased IPs available for autocomplete
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // Text input for other text fields (Interface and Rule Label are handled above)
   const getPlaceholder = (): string => {
-    if (fieldType === 'sourceIp' || fieldType === 'destinationIp') {
-      return 'e.g., 192.168.1.1 or 10.0.0.0/24';
-    }
     if (operatorType === 'regex') {
       return 'e.g., ^192\\.168\\.*';
     }

@@ -570,4 +570,193 @@ mod tests {
         cache.set_connection_status(ConnectionStatus::Connected, None);
         assert!(cache.get_connection_info().last_error.is_none());
     }
+
+    // ============================================================================
+    // Alias Cache Tests (Story 3.4)
+    // ============================================================================
+
+    #[test]
+    fn test_set_and_get_alias() {
+        let cache = EnrichmentCacheState::new();
+
+        let aliases = vec![
+            AliasMapping {
+                alias_name: "Servers_Group".to_string(),
+                group_members: vec!["192.168.1.100".to_string(), "192.168.1.101".to_string()],
+                description: Some("Server subnet".to_string()),
+                alias_type: Some("network".to_string()),
+            }
+        ];
+
+        cache.set_alias("192.168.1.100".to_string(), aliases.clone());
+
+        let retrieved = cache.get_alias("192.168.1.100");
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap()[0].alias_name, "Servers_Group");
+    }
+
+    #[test]
+    fn test_get_alias_returns_none_for_unknown_ip() {
+        let cache = EnrichmentCacheState::new();
+        assert!(cache.get_alias("192.168.1.100").is_none());
+    }
+
+    #[test]
+    fn test_set_aliases_batch() {
+        let cache = EnrichmentCacheState::new();
+
+        let mut alias_map = HashMap::new();
+        alias_map.insert("192.168.1.100".to_string(), vec![
+            AliasMapping {
+                alias_name: "Servers".to_string(),
+                group_members: vec!["192.168.1.100".to_string()],
+                description: None,
+                alias_type: None,
+            }
+        ]);
+        alias_map.insert("192.168.1.200".to_string(), vec![
+            AliasMapping {
+                alias_name: "Workstations".to_string(),
+                group_members: vec!["192.168.1.200".to_string(), "192.168.1.201".to_string()],
+                description: Some("User workstations".to_string()),
+                alias_type: Some("host".to_string()),
+            }
+        ]);
+
+        cache.set_aliases(alias_map, "device1".to_string());
+
+        let all_aliases = cache.get_all_aliases().unwrap();
+        assert_eq!(all_aliases.mappings.len(), 2);
+        assert_eq!(all_aliases.device_id, "device1");
+    }
+
+    #[test]
+    fn test_get_all_aliases_returns_none_when_empty() {
+        let cache = EnrichmentCacheState::new();
+        assert!(cache.get_all_aliases().is_none());
+    }
+
+    #[test]
+    fn test_clear_aliases() {
+        let cache = EnrichmentCacheState::new();
+        cache.set_alias("192.168.1.100".to_string(), vec![
+            AliasMapping {
+                alias_name: "Test".to_string(),
+                group_members: vec![],
+                description: None,
+                alias_type: None,
+            }
+        ]);
+        assert!(cache.get_all_aliases().is_some());
+
+        cache.clear_aliases();
+        assert!(cache.get_all_aliases().is_none());
+    }
+
+    #[test]
+    fn test_alias_cache_timestamp_update() {
+        let cache = EnrichmentCacheState::new();
+
+        cache.set_alias("192.168.1.100".to_string(), vec![
+            AliasMapping {
+                alias_name: "Test".to_string(),
+                group_members: vec![],
+                description: None,
+                alias_type: None,
+            }
+        ]);
+
+        let all_aliases = cache.get_all_aliases().unwrap();
+        assert!(all_aliases.last_updated <= Utc::now());
+    }
+
+    #[test]
+    fn test_alias_cache_extends_on_batch_set() {
+        let cache = EnrichmentCacheState::new();
+
+        // First batch
+        let mut aliases1 = HashMap::new();
+        aliases1.insert("192.168.1.100".to_string(), vec![
+            AliasMapping {
+                alias_name: "Servers".to_string(),
+                group_members: vec!["192.168.1.100".to_string()],
+                description: None,
+                alias_type: None,
+            }
+        ]);
+        cache.set_aliases(aliases1, "device1".to_string());
+
+        // Second batch extends cache
+        let mut aliases2 = HashMap::new();
+        aliases2.insert("192.168.1.200".to_string(), vec![
+            AliasMapping {
+                alias_name: "Workstations".to_string(),
+                group_members: vec!["192.168.1.200".to_string()],
+                description: None,
+                alias_type: None,
+            }
+        ]);
+        cache.set_aliases(aliases2, "device2".to_string());
+
+        // Both aliases should be present
+        assert!(cache.get_alias("192.168.1.100").is_some());
+        assert!(cache.get_alias("192.168.1.200").is_some());
+
+        let all_aliases = cache.get_all_aliases().unwrap();
+        assert_eq!(all_aliases.mappings.len(), 2);
+        assert_eq!(all_aliases.device_id, "device2");
+    }
+
+    #[test]
+    fn test_alias_with_multiple_group_members() {
+        let cache = EnrichmentCacheState::new();
+
+        let aliases = vec![
+            AliasMapping {
+                alias_name: "DMZ_Servers".to_string(),
+                group_members: vec![
+                    "192.168.1.100".to_string(),
+                    "192.168.1.101".to_string(),
+                    "192.168.1.102".to_string(),
+                ],
+                description: Some("DMZ server subnet".to_string()),
+                alias_type: Some("network".to_string()),
+            }
+        ];
+
+        cache.set_alias("192.168.1.100".to_string(), aliases.clone());
+
+        let retrieved = cache.get_alias("192.168.1.100").unwrap();
+        assert_eq!(retrieved[0].group_members.len(), 3);
+        assert_eq!(retrieved[0].group_members[0], "192.168.1.100");
+        assert_eq!(retrieved[0].group_members[1], "192.168.1.101");
+        assert_eq!(retrieved[0].group_members[2], "192.168.1.102");
+    }
+
+    #[test]
+    fn test_ip_with_multiple_aliases() {
+        let cache = EnrichmentCacheState::new();
+
+        let aliases = vec![
+            AliasMapping {
+                alias_name: "Servers_Group".to_string(),
+                group_members: vec!["192.168.1.100".to_string()],
+                description: None,
+                alias_type: Some("host".to_string()),
+            },
+            AliasMapping {
+                alias_name: "DMZ_Hosts".to_string(),
+                group_members: vec!["192.168.1.100".to_string(), "192.168.1.101".to_string()],
+                description: Some("DMZ hosts".to_string()),
+                alias_type: Some("network".to_string()),
+            }
+        ];
+
+        cache.set_alias("192.168.1.100".to_string(), aliases.clone());
+
+        let retrieved = cache.get_alias("192.168.1.100").unwrap();
+        assert_eq!(retrieved.len(), 2);
+        assert_eq!(retrieved[0].alias_name, "Servers_Group");
+        assert_eq!(retrieved[1].alias_name, "DMZ_Hosts");
+    }
 }

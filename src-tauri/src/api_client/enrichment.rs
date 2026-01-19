@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use tokio::task::JoinSet;
 use tokio::sync::Semaphore;
 use std::sync::Arc;
-use log::{debug, info, warn, error};
+use tracing::{debug, info, warn, error};
 
 use crate::api_client::client::build_api_client;
 use crate::api_client::types::{
@@ -241,7 +241,7 @@ async fn fetch_aliases_for_ip(
 
     let url = format!("{}/api/firewall/alias/searchItem", credentials.endpoint_url);
 
-    log::debug!("Fetching aliases for IP: {}", ip);
+    debug!("Fetching aliases for IP: {}", ip);
 
     let request_body = serde_json::json!({
         "item": ip
@@ -642,5 +642,186 @@ mod staleness_tests {
         let one_hour = Utc::now() - Duration::hours(1);
         let formatted = format_enrichment_age(&one_hour).unwrap();
         assert_eq!(formatted, "1 hour");
+    }
+}
+
+// ============================================================================
+// Alias Resolution Tests (Story 3.4)
+// ============================================================================
+
+#[cfg(test)]
+mod alias_tests {
+    use super::*;
+    use crate::api_client::types::AliasRow;
+
+    /// Test parsing alias response with group members
+    #[test]
+    fn test_alias_response_parsing_with_group_members() {
+        let alias_row = AliasRow {
+            alias_uuid: Some("uuid-123".to_string()),
+            name: "Servers_Group".to_string(),
+            alias_type: Some("network".to_string()),
+            content: "192.168.1.100,192.168.1.101,192.168.1.102".to_string(),
+            description: Some("Server subnet".to_string()),
+        };
+
+        // Simulate the parsing logic from fetch_aliases_for_ip
+        let group_members: Vec<String> = alias_row.content
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let alias_mapping = AliasMapping {
+            alias_name: alias_row.name,
+            group_members: group_members.clone(),
+            description: alias_row.description,
+            alias_type: alias_row.alias_type,
+        };
+
+        assert_eq!(alias_mapping.alias_name, "Servers_Group");
+        assert_eq!(alias_mapping.group_members.len(), 3);
+        assert_eq!(alias_mapping.group_members[0], "192.168.1.100");
+        assert_eq!(alias_mapping.group_members[1], "192.168.1.101");
+        assert_eq!(alias_mapping.group_members[2], "192.168.1.102");
+        assert_eq!(alias_mapping.description.unwrap(), "Server subnet");
+        assert_eq!(alias_mapping.alias_type.unwrap(), "network");
+    }
+
+    /// Test parsing alias response with single IP
+    #[test]
+    fn test_alias_response_parsing_single_ip() {
+        let alias_row = AliasRow {
+            alias_uuid: Some("uuid-456".to_string()),
+            name: "Web_Server".to_string(),
+            alias_type: Some("host".to_string()),
+            content: "192.168.1.100".to_string(),
+            description: None,
+        };
+
+        let group_members: Vec<String> = alias_row.content
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let alias_mapping = AliasMapping {
+            alias_name: alias_row.name,
+            group_members: group_members.clone(),
+            description: alias_row.description,
+            alias_type: alias_row.alias_type,
+        };
+
+        assert_eq!(alias_mapping.alias_name, "Web_Server");
+        assert_eq!(alias_mapping.group_members.len(), 1);
+        assert_eq!(alias_mapping.group_members[0], "192.168.1.100");
+        assert!(alias_mapping.description.is_none());
+    }
+
+    /// Test parsing alias response with empty content
+    #[test]
+    fn test_alias_response_parsing_empty_content() {
+        let alias_row = AliasRow {
+            alias_uuid: None,
+            name: "Empty_Alias".to_string(),
+            alias_type: None,
+            content: "".to_string(),
+            description: None,
+        };
+
+        let group_members: Vec<String> = alias_row.content
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        assert_eq!(group_members.len(), 0);
+    }
+
+    /// Test parsing alias response with whitespace in content
+    #[test]
+    fn test_alias_response_parsing_with_whitespace() {
+        let alias_row = AliasRow {
+            alias_uuid: Some("uuid-789".to_string()),
+            name: "DMZ_Hosts".to_string(),
+            alias_type: Some("network".to_string()),
+            content: " 192.168.1.100 , 192.168.1.101 , 192.168.1.102 ".to_string(),
+            description: Some("DMZ subnet".to_string()),
+        };
+
+        let group_members: Vec<String> = alias_row.content
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        assert_eq!(group_members.len(), 3);
+        assert_eq!(group_members[0], "192.168.1.100");
+        assert_eq!(group_members[1], "192.168.1.101");
+        assert_eq!(group_members[2], "192.168.1.102");
+    }
+
+    /// Test alias response with multiple aliases (simulating multiple rows)
+    #[test]
+    fn test_multiple_aliases_for_single_ip() {
+        let alias_rows = vec![
+            AliasRow {
+                alias_uuid: Some("uuid-1".to_string()),
+                name: "Servers".to_string(),
+                alias_type: Some("host".to_string()),
+                content: "192.168.1.100".to_string(),
+                description: None,
+            },
+            AliasRow {
+                alias_uuid: Some("uuid-2".to_string()),
+                name: "DMZ_Hosts".to_string(),
+                alias_type: Some("network".to_string()),
+                content: "192.168.1.100,192.168.1.101".to_string(),
+                description: Some("DMZ subnet".to_string()),
+            },
+        ];
+
+        let aliases: Vec<AliasMapping> = alias_rows.into_iter().map(|row| {
+            let group_members: Vec<String> = row.content
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            AliasMapping {
+                alias_name: row.name,
+                group_members,
+                description: row.description,
+                alias_type: row.alias_type,
+            }
+        }).collect();
+
+        assert_eq!(aliases.len(), 2);
+        assert_eq!(aliases[0].alias_name, "Servers");
+        assert_eq!(aliases[1].alias_name, "DMZ_Hosts");
+        assert_eq!(aliases[1].group_members.len(), 2);
+    }
+
+    /// Test empty alias response (IP not aliased)
+    #[test]
+    fn test_empty_alias_response() {
+        let alias_rows: Vec<AliasRow> = vec![];
+
+        let aliases: Vec<AliasMapping> = alias_rows.into_iter().map(|row| {
+            let group_members: Vec<String> = row.content
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            AliasMapping {
+                alias_name: row.name,
+                group_members,
+                description: row.description,
+                alias_type: row.alias_type,
+            }
+        }).collect();
+
+        assert_eq!(aliases.len(), 0);
     }
 }

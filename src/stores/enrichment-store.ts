@@ -1,16 +1,10 @@
 import { create } from 'zustand';
+import type { AliasMapping } from '@/types/api';
 
 interface InterfaceMappingCache {
   mappings: Record<string, string>; // physical → logical
   lastUpdated: string; // ISO 8601 timestamp
   deviceId: string;
-}
-
-interface AliasMapping {
-  aliasName: string;
-  groupMembers: string[];
-  description?: string;
-  aliasType?: string;
 }
 
 // Story 3.5: Connection status types

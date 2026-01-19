@@ -23,3 +23,14 @@ export interface ConnectionTestResult {
   opnsenseVersion?: string;
   errorMessage?: string;
 }
+
+/**
+ * Alias mapping for IP addresses
+ * Story 3.4: Alias Resolution (IP Groups)
+ */
+export interface AliasMapping {
+  aliasName: string;
+  groupMembers: string[];
+  description?: string;
+  aliasType?: string;
+}

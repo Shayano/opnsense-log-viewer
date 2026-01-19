@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { AliasMapping } from '@/types/api';
 import { LogEntry } from '@/types/log-entry';
 import { extractUniqueRuleHashes } from '@/utils/extract-rule-hashes';
 import { extractUniqueIPs } from '@/utils/extract-ips';
@@ -85,13 +86,6 @@ export async function loadCachedRuleLabels(): Promise<void> {
 // ============================================================================
 // Alias Resolution (Story 3.4)
 // ============================================================================
-
-interface AliasMapping {
-  aliasName: string;
-  groupMembers: string[];
-  description?: string;
-  aliasType?: string;
-}
 
 /**
  * Enrich IP aliases for loaded log entries

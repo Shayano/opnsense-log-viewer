@@ -14,7 +14,7 @@ import { StalenessIndicator, MinimizedStalenessIcon } from './components/enrichm
 import { ApiReconnectedPrompt } from './components/dialogs/api-reconnected-prompt';
 import { loadApiCredentials, testApiConnection } from './utils/api-client';
 import { useEnrichmentStore } from './stores/enrichment-store';
-import { loadCachedRuleLabels } from './services/enrichment-service';
+import { loadCachedRuleLabels, loadCachedAliases } from './services/enrichment-service';
 import { detectIncompleteExports, cleanupPartialExport } from './services/export-service';
 import toast from 'react-hot-toast';
 
@@ -121,6 +121,11 @@ function App() {
   // Story 3.3: Auto-load rule labels on app startup
   useEffect(() => {
     loadCachedRuleLabels();
+  }, []);
+
+  // Story 3.4: Auto-load IP aliases on app startup
+  useEffect(() => {
+    loadCachedAliases();
   }, []);
 
   // Story 5.3: Detect incomplete exports on startup
