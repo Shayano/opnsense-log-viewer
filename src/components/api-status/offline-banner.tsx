@@ -9,7 +9,6 @@ export function OfflineBanner() {
   const connectionStatus = useEnrichmentStore((state) => state.connectionStatus);
   const lastError = useEnrichmentStore((state) => state.lastError);
   const setConnectionStatus = useEnrichmentStore((state) => state.setConnectionStatus);
-  const setBackupEnrichment = useEnrichmentStore((state) => state.setBackupEnrichment);
 
   const [isRetrying, setIsRetrying] = useState(false);
   const [isImporting, setIsImporting] = useState(false);

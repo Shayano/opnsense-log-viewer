@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { FieldRow } from './field-row';
-import * as clipboard from '@/utils/clipboard';
-import toast from 'react-hot-toast';
 
 vi.mock('@/utils/clipboard');
 vi.mock('react-hot-toast');

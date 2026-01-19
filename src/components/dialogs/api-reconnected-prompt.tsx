@@ -11,7 +11,7 @@ export function ApiReconnectedPrompt() {
   const clearBackupEnrichment = useEnrichmentStore((state) => state.clearBackupEnrichment);
 
   useEffect(() => {
-    const unlisten = listen('api-reconnected', (event) => {
+    const unlisten = listen('api-reconnected', (_event) => {
       // Only show if backup enrichment is currently active
       if (backupEnrichmentActive) {
         setIsOpen(true);

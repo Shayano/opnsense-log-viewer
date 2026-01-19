@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { useSearchHistoryStore } from './search-history-store';
 import { MAX_SEARCH_HISTORY } from '@/types/search-history';
 

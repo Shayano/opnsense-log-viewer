@@ -2,7 +2,6 @@ import { useState, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import type {
   ExportFormat,
-  ExportMetadata,
   ExportProgress,
   ExportLogEntry,
 } from '@/types/export';
@@ -60,6 +59,7 @@ export function useExport(options: UseExportOptions): UseExportReturn {
         options.filePath,
         options.fileHash,
         options.filters,
+        'filtered', // useExport is for filtered results only
         options.enrichmentActive || false,
         options.enrichmentSource,
         options.enrichmentExportedAt

@@ -5,10 +5,10 @@ import type { LogEntry } from '@/types/log-entry';
 describe('extractUniqueRuleHashes', () => {
   it('should extract unique rule hashes from entries', () => {
     const entries: LogEntry[] = [
-      { ruleLabel: 'abc123', timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as LogEntry,
-      { ruleLabel: 'def456', timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as LogEntry,
-      { ruleLabel: 'abc123', timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as LogEntry, // duplicate
-      { ruleLabel: 'xyz789', timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as LogEntry,
+      { ruleLabel: 'abc123', timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as unknown as LogEntry,
+      { ruleLabel: 'def456', timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as unknown as LogEntry,
+      { ruleLabel: 'abc123', timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as unknown as LogEntry, // duplicate
+      { ruleLabel: 'xyz789', timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as unknown as LogEntry,
     ];
 
     const result = extractUniqueRuleHashes(entries);
@@ -26,11 +26,11 @@ describe('extractUniqueRuleHashes', () => {
 
   it('should filter out null/undefined/empty values', () => {
     const entries: LogEntry[] = [
-      { ruleLabel: 'abc123', timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as LogEntry,
-      { ruleLabel: null as any, timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as LogEntry,
-      { ruleLabel: undefined as any, timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as LogEntry,
-      { ruleLabel: '', timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as LogEntry,
-      { ruleLabel: '   ', timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as LogEntry, // whitespace
+      { ruleLabel: 'abc123', timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as unknown as LogEntry,
+      { ruleLabel: null as any, timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as unknown as LogEntry,
+      { ruleLabel: undefined as any, timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as unknown as LogEntry,
+      { ruleLabel: '', timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as unknown as LogEntry,
+      { ruleLabel: '   ', timestamp: '', sourceIp: '', destinationIp: '', protocol: '', action: '' } as unknown as LogEntry, // whitespace
     ];
 
     const result = extractUniqueRuleHashes(entries);
@@ -47,7 +47,7 @@ describe('extractUniqueRuleHashes', () => {
       destinationIp: '',
       protocol: '',
       action: '',
-    })) as LogEntry[];
+    })) as unknown as LogEntry[];
 
     const result = extractUniqueRuleHashes(entries);
 

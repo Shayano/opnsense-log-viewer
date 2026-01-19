@@ -1,8 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { FilterSidebar } from './filter-sidebar';
 import { useFilterStore } from '@/stores/filter-store';
-import toast from 'react-hot-toast';
 
 // Mock toast
 vi.mock('react-hot-toast', () => ({

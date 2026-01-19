@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { extractUniqueIPs } from './extract-ips';
-import { LogEntry } from '@/types/log-entry';
+import { LogEntry, Protocol, Action } from '@/types/log-entry';
 
 // Helper to create mock log entries
 function createMockLogEntry(
@@ -9,16 +9,16 @@ function createMockLogEntry(
   overrides: Partial<LogEntry> = {}
 ): LogEntry {
   return {
+    id: 'test-id',
     timestamp: new Date().toISOString(),
     sourceIp,
     destinationIp,
     sourcePort: 12345,
     destinationPort: 80,
-    protocol: 'TCP',
-    action: 'pass',
+    protocol: Protocol.TCP,
+    action: Action.PASS,
     interface: 'lan',
-    direction: 'out',
-    ruleHash: 'abc123',
+    ruleLabel: '',
     ...overrides,
   };
 }

@@ -19,13 +19,12 @@ vi.mock('react-hot-toast', () => ({
 
 // Mock browser confirm
 const mockConfirm = vi.fn();
-global.confirm = mockConfirm;
+window.confirm = mockConfirm;
 
 describe('enrichment-export service', () => {
   const mockInvoke = invoke as any;
   const mockToastSuccess = vi.mocked(toast.success);
   const mockToastError = vi.mocked(toast.error);
-  const mockToastDismiss = vi.mocked(toast.dismiss);
 
   beforeEach(() => {
     vi.clearAllMocks();

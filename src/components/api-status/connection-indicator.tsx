@@ -32,6 +32,14 @@ export function ConnectionIndicator() {
           color: 'text-red-600 dark:text-red-400',
           dotColor: 'bg-red-600 dark:bg-red-400',
         };
+      default:
+        // Fallback for unexpected status
+        return {
+          icon: WifiOff,
+          label: 'Unknown',
+          color: 'text-gray-600 dark:text-gray-400',
+          dotColor: 'bg-gray-600 dark:bg-gray-400',
+        };
     }
   };
 

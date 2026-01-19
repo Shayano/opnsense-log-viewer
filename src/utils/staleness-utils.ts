@@ -1,4 +1,4 @@
-import { formatDistanceToNow, formatDuration, intervalToDuration, format } from 'date-fns';
+import { intervalToDuration, format } from 'date-fns';
 
 export enum StalenessSeverity {
   Fresh = 'fresh',
@@ -12,7 +12,7 @@ const STALENESS_THRESHOLD_DAYS = 7;
  * Calculate staleness severity based on enrichment age
  */
 export function calculateStalenessSeverity(
-  importedAt: Date,
+  _importedAt: Date,
   exportTimestamp: Date
 ): StalenessSeverity {
   const ageDays = calculateAgeDays(exportTimestamp);

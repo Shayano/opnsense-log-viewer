@@ -99,8 +99,8 @@ async function openFolder(filePath: string, toastId?: string | number) {
     await invoke('open_folder', { filePath });
 
     // Dismiss toast after opening folder
-    if (toastId) {
-      toast.dismiss(toastId);
+    if (toastId !== undefined) {
+      toast.dismiss(String(toastId));
     }
   } catch (error) {
     toast.error(`Failed to open folder: ${error}`);

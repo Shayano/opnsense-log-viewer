@@ -46,7 +46,7 @@ describe('useIPAlias', () => {
         {
           aliasName: 'Servers_Group',
           groupMembers: ['192.168.1.100'],
-          description: null,
+          description: undefined,
           aliasType: 'host',
         },
         {
@@ -75,8 +75,8 @@ describe('useIPAlias', () => {
         {
           aliasName: 'Empty_Alias',
           groupMembers: [],
-          description: null,
-          aliasType: null,
+          description: undefined,
+          aliasType: undefined,
         },
       ],
     });
@@ -121,7 +121,7 @@ describe('useIPAlias', () => {
         {
           aliasName: 'Servers',
           groupMembers: ['192.168.1.100'],
-          description: null,
+          description: undefined,
           aliasType: 'host',
         },
       ],
@@ -129,7 +129,7 @@ describe('useIPAlias', () => {
         {
           aliasName: 'Workstations',
           groupMembers: ['192.168.1.200'],
-          description: null,
+          description: undefined,
           aliasType: 'host',
         },
       ],
@@ -157,7 +157,7 @@ describe('useIPAlias', () => {
         {
           aliasName: 'NewServer',
           groupMembers: ['192.168.1.100'],
-          description: null,
+          description: undefined,
           aliasType: 'host',
         },
       ],
@@ -184,20 +184,20 @@ describe('useIPAlias', () => {
         {
           aliasName: 'Alias1',
           groupMembers: ['192.168.1.100', '192.168.1.101'],
-          description: null,
-          aliasType: null,
+          description: undefined,
+          aliasType: undefined,
         },
         {
           aliasName: 'Alias2',
           groupMembers: ['192.168.1.100', '192.168.1.102'],
-          description: null,
-          aliasType: null,
+          description: undefined,
+          aliasType: undefined,
         },
         {
           aliasName: 'Alias3',
           groupMembers: ['192.168.1.100'],
-          description: null,
-          aliasType: null,
+          description: undefined,
+          aliasType: undefined,
         },
       ],
     });

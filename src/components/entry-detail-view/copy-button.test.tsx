@@ -2,15 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { CopyButton } from './copy-button';
 import * as clipboard from '@/utils/clipboard';
-import toast from 'react-hot-toast';
 
 vi.mock('@/utils/clipboard');
 vi.mock('react-hot-toast');
 
 describe('CopyButton', () => {
   const mockCopyToClipboard = vi.mocked(clipboard.copyToClipboard);
-  const mockToastSuccess = vi.mocked(toast.success);
-  const mockToastError = vi.mocked(toast.error);
 
   beforeEach(() => {
     vi.clearAllMocks();

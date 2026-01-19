@@ -346,7 +346,8 @@ src-tauri/src/
 - ✅ `release.yml`: Automated releases with changelog
 
 **Pre-Commit Checks:**
-- ✅ Run tests locally before pushing
+- ✅ Run tests locally before pushing (`npm test` must pass)
+- ✅ Run build verification (`npm run build` must pass with 0 TypeScript errors)
 - ✅ Run linters (clippy, ESLint)
 - ✅ Verify performance benchmarks pass gates
 

@@ -107,14 +107,12 @@ export async function exportFilteredResults(
     }
 
     // Step 2: Set up progress listener
-    let progressModalOpen = true;
     const unlistenProgress = await listen<ExportProgress>('export-progress', (event) => {
       // Progress updates handled by component
       console.log('Export progress:', event.payload);
     });
 
     const unlistenComplete = await listen<ExportResult>('export-complete', (event) => {
-      progressModalOpen = false;
       unlistenProgress();
       unlistenComplete();
       unlistenError();
@@ -165,7 +163,6 @@ export async function exportFilteredResults(
     });
 
     const unlistenError = await listen<string>('export-error', (event) => {
-      progressModalOpen = false;
       unlistenProgress();
       unlistenComplete();
       unlistenError();
@@ -195,7 +192,7 @@ export async function exportFilteredResults(
 export async function cancelExport(): Promise<void> {
   try {
     await invoke('cancel_export');
-    toast.info('Export cancelled');
+    toast('Export cancelled');
   } catch (error) {
     console.error('Failed to cancel export:', error);
   }
@@ -271,14 +268,12 @@ export async function executeStreamingExport(
     }
 
     // Step 2: Set up progress listener
-    let progressModalOpen = true;
     const unlistenProgress = await listen<ExportProgress>('export-progress', (event) => {
       // Progress updates handled by component
       console.log('Export progress:', event.payload);
     });
 
     const unlistenComplete = await listen<ExportResult>('export-complete', (event) => {
-      progressModalOpen = false;
       unlistenProgress();
       unlistenComplete();
       unlistenError();
@@ -329,7 +324,6 @@ export async function executeStreamingExport(
     });
 
     const unlistenError = await listen<string>('export-error', (event) => {
-      progressModalOpen = false;
       unlistenProgress();
       unlistenComplete();
       unlistenError();

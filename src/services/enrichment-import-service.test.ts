@@ -26,16 +26,16 @@ const originalConsoleWarn = console.warn;
 // Mock browser alert and confirm
 const mockAlert = vi.fn();
 const mockConfirm = vi.fn();
-const originalAlert = global.alert;
-const originalConfirm = global.confirm;
+const originalAlert = window.alert;
+const originalConfirm = window.confirm;
 
 describe('enrichment-import-service', () => {
   const mockInvoke = invoke as any;
 
   beforeEach(() => {
     // Setup mocks
-    global.alert = mockAlert;
-    global.confirm = mockConfirm;
+    window.alert = mockAlert;
+    window.confirm = mockConfirm;
     console.error = mockConsoleError;
     console.warn = mockConsoleWarn;
     vi.clearAllMocks();
@@ -50,8 +50,8 @@ describe('enrichment-import-service', () => {
 
   afterEach(() => {
     // Restore original globals to prevent test pollution
-    global.alert = originalAlert;
-    global.confirm = originalConfirm;
+    window.alert = originalAlert;
+    window.confirm = originalConfirm;
     console.error = originalConsoleError;
     console.warn = originalConsoleWarn;
   });

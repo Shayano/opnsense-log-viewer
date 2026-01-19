@@ -13,7 +13,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 export function SearchHistorySection(): JSX.Element {
   const { searchHistory, deleteHistoryEntry, clearAllHistory } = useSearchHistoryStore();
-  const { clearFilters, filters, setDraftMode } = useFilterStore();
+  const { clearFilters, setDraftMode } = useFilterStore();
   const { setResult, setExecuting, setError } = useQueryStore();
   const [isExpanded, setIsExpanded] = useState(true);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);

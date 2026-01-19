@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FilterSidebar } from './filter-sidebar';
 import { useFilterStore } from '@/stores/filter-store';
-import { useSearchHistoryStore } from '@/stores/search-history-store';
 
 // Mock useSearchHistoryStore
 vi.mock('@/stores/search-history-store', () => ({
