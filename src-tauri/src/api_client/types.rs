@@ -174,3 +174,84 @@ pub struct AliasRow {
     #[serde(rename = "descr")]
     pub description: Option<String>,
 }
+
+// ============================================================================
+// Enrichment Export Types (Story 4.1)
+// ============================================================================
+
+/// Cache status counts for export metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheStatus {
+    pub interfaces_count: usize,
+    pub rules_count: usize,
+    pub aliases_count: usize,
+}
+
+/// Metadata for enrichment export
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportMetadata {
+    /// Export creation timestamp (ISO 8601)
+    pub export_timestamp: DateTime<Utc>,
+
+    /// OPNsense endpoint URL (without credentials)
+    pub device_id: String,
+
+    /// OPNsense version (if available)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opnsense_version: Option<String>,
+
+    /// Configuration hash for change detection (SHA-256)
+    pub config_hash: String,
+
+    /// Application version that created the export
+    pub app_version: String,
+
+    /// Source of enrichment data ("live_api" or "cache")
+    pub data_source: String,
+
+    /// Cache status - number of entries per type
+    pub cache_status: CacheStatus,
+}
+
+/// Complete enrichment export data
+///
+/// SECURITY: This structure MUST NOT contain any API credentials.
+/// Only enrichment mappings are exported for offline use.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportedEnrichmentData {
+    /// Export metadata
+    pub metadata: ExportMetadata,
+
+    /// Interface mappings: physical_name → logical_name
+    /// Example: {"vtnet0": "LAN", "vtnet1": "WAN"}
+    pub interfaces: HashMap<String, String>,
+
+    /// Rule labels: rule_hash → description
+    /// Example: {"abc123": "Block RFC1918 Networks"}
+    pub rule_labels: HashMap<String, String>,
+
+    /// Aliases: alias_name → [IP addresses]
+    /// Example: {"Servers_Group": ["192.168.1.100", "192.168.1.101"]}
+    pub aliases: HashMap<String, Vec<String>>,
+}
+
+/// Export command result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportResult {
+    /// Exported data (serialized JSON)
+    pub json_data: String,
+
+    /// Suggested filename
+    pub filename: String,
+
+    /// Warning if enrichment data is minimal/empty
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+
+    /// Cache status for UI display
+    pub cache_status: CacheStatus,
+}

@@ -350,3 +350,141 @@ pub async fn fetch_aliases_batch(
     info!("Alias fetch complete: {} aliased, {} errors", success_count, error_count);
     Ok(alias_map)
 }
+
+// ============================================================================
+// Enrichment Export Helpers (Story 4.1)
+// ============================================================================
+
+/// Fetch OPNsense version from firmware API
+///
+/// Returns None if API unavailable or version not found
+/// This is optional metadata for enrichment exports
+pub async fn fetch_opnsense_version(
+    credentials: &ApiCredentials,
+) -> Result<Option<String>> {
+    let client = build_api_client(credentials)?;
+
+    let url = format!("{}/api/core/firmware/status", credentials.endpoint_url);
+
+    debug!("Fetching OPNsense version for export metadata");
+
+    let response = client
+        .get(&url)
+        .header("X-API-Key", &credentials.api_key)
+        .header("X-API-Secret", &credentials.api_secret)
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) if resp.status().is_success() => {
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                // Extract version from response
+                let version = json.get("product_version")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                if let Some(ref v) = version {
+                    debug!("OPNsense version: {}", v);
+                }
+
+                Ok(version)
+            } else {
+                debug!("Failed to parse firmware status response");
+                Ok(None)
+            }
+        }
+        Ok(resp) => {
+            debug!("Failed to parse firmware status response or non-success status: {}", resp.status());
+            Ok(None)
+        }
+        Err(e) => {
+            // API unavailable or error - not critical for export
+            debug!("Failed to fetch OPNsense version (non-critical): {}", e);
+            Ok(None)
+        }
+    }
+}
+
+/// Calculate configuration hash for change detection
+///
+/// Hash is deterministic - same data produces same hash
+/// Uses SHA-256 to generate hex string (64 characters)
+pub fn calculate_config_hash(
+    interfaces: &HashMap<String, String>,
+    rule_labels: &HashMap<String, String>,
+    aliases: &HashMap<String, Vec<String>>,
+) -> String {
+    use sha2::{Sha256, Digest};
+
+    let mut hasher = Sha256::new();
+
+    // Serialize data to JSON (without metadata to avoid timestamp changing hash)
+    // Note: HashMap iteration order is not deterministic in Rust, but serde_json
+    // sorts keys alphabetically, making this deterministic
+    let hash_input = format!(
+        "{}{}{}",
+        serde_json::to_string(interfaces).unwrap_or_default(),
+        serde_json::to_string(rule_labels).unwrap_or_default(),
+        serde_json::to_string(aliases).unwrap_or_default(),
+    );
+
+    hasher.update(hash_input.as_bytes());
+    let result = hasher.finalize();
+
+    // Return hex-encoded hash
+    format!("{:x}", result)
+}
+
+#[cfg(test)]
+mod export_tests {
+    use super::*;
+
+    #[test]
+    fn test_config_hash_deterministic() {
+        let mut interfaces = HashMap::new();
+        interfaces.insert("vtnet0".to_string(), "LAN".to_string());
+        interfaces.insert("vtnet1".to_string(), "WAN".to_string());
+
+        let mut rule_labels = HashMap::new();
+        rule_labels.insert("abc123".to_string(), "Block RFC1918".to_string());
+
+        let mut aliases = HashMap::new();
+        aliases.insert("Servers".to_string(), vec!["192.168.1.100".to_string()]);
+
+        let hash1 = calculate_config_hash(&interfaces, &rule_labels, &aliases);
+        let hash2 = calculate_config_hash(&interfaces, &rule_labels, &aliases);
+
+        assert_eq!(hash1, hash2, "Hash should be deterministic");
+        assert_eq!(hash1.len(), 64, "SHA-256 hash should be 64 hex characters");
+    }
+
+    #[test]
+    fn test_config_hash_changes_with_data() {
+        let mut interfaces1 = HashMap::new();
+        interfaces1.insert("vtnet0".to_string(), "LAN".to_string());
+
+        let mut interfaces2 = HashMap::new();
+        interfaces2.insert("vtnet0".to_string(), "LAN".to_string());
+        interfaces2.insert("vtnet1".to_string(), "WAN".to_string());
+
+        let rule_labels = HashMap::new();
+        let aliases = HashMap::new();
+
+        let hash1 = calculate_config_hash(&interfaces1, &rule_labels, &aliases);
+        let hash2 = calculate_config_hash(&interfaces2, &rule_labels, &aliases);
+
+        assert_ne!(hash1, hash2, "Hash should change when data changes");
+    }
+
+    #[test]
+    fn test_config_hash_with_empty_data() {
+        let interfaces = HashMap::new();
+        let rule_labels = HashMap::new();
+        let aliases = HashMap::new();
+
+        let hash = calculate_config_hash(&interfaces, &rule_labels, &aliases);
+
+        assert_eq!(hash.len(), 64, "Hash should work with empty data");
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()), "Hash should be valid hex");
+    }
+}

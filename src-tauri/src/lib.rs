@@ -95,7 +95,11 @@ pub fn run() {
             api_client::commands::get_alias,
             // Story 3.5: Connection Management
             api_client::commands::get_connection_status,
-            api_client::commands::retry_api_connection
+            api_client::commands::retry_api_connection,
+            // Story 4.1: Enrichment Export
+            api_client::commands::export_enrichment_data,
+            api_client::commands::save_enrichment_export,
+            api_client::commands::open_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

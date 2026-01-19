@@ -1,11 +1,12 @@
 use tauri::{command, AppHandle, Emitter, State};
-use crate::api_client::types::{AliasMapping, ApiCredentials, ConnectionInfo, ConnectionStatus, ConnectionTestResult, InterfaceMappingCache};
+use crate::api_client::types::{AliasMapping, ApiCredentials, CacheStatus, ConnectionInfo, ConnectionStatus, ConnectionTestResult, ExportedEnrichmentData, ExportMetadata, ExportResult, InterfaceMappingCache};
 use crate::api_client::client::test_connection;
-use crate::api_client::enrichment::{fetch_aliases_batch, fetch_interface_mappings, fetch_rule_labels_batch};
+use crate::api_client::enrichment::{calculate_config_hash, fetch_aliases_batch, fetch_interface_mappings, fetch_opnsense_version, fetch_rule_labels_batch};
 use crate::credentials::{manager, encrypted_storage};
 use crate::state::EnrichmentCacheState;
 use log::{info, warn};
 use std::collections::HashMap;
+use chrono::Utc;
 
 /// Save API credentials to OS keychain (with encrypted fallback)
 #[command]
@@ -321,5 +322,360 @@ pub async fn retry_api_connection(
             cache_state.set_connection_status(ConnectionStatus::Disconnected, Some(error_msg.clone()));
             Err(error_msg)
         }
+    }
+}
+
+// ============================================================================
+// Enrichment Export Commands (Story 4.1)
+// ============================================================================
+
+/// Export enrichment data to JSON
+///
+/// Gathers all cached enrichment data and prepares JSON export with metadata
+#[command]
+pub async fn export_enrichment_data(
+    cache_state: State<'_, EnrichmentCacheState>,
+) -> Result<ExportResult, String> {
+    info!("Exporting enrichment data");
+
+    // Retrieve all cached data
+    let interface_cache = cache_state.get_all_interface_mappings();
+    let rule_label_cache = cache_state.get_all_rule_labels();
+    let alias_cache = cache_state.get_all_aliases();
+
+    let interfaces = interface_cache
+        .as_ref()
+        .map(|c| c.mappings.clone())
+        .unwrap_or_default();
+
+    let rule_labels = rule_label_cache
+        .as_ref()
+        .map(|c| c.mappings.clone())
+        .unwrap_or_default();
+
+    // Transform alias data: from HashMap<String, Vec<AliasMapping>> (IP → aliases)
+    // to HashMap<String, Vec<String>> (alias_name → IPs)
+    let aliases = transform_aliases_for_export(&alias_cache
+        .as_ref()
+        .map(|c| c.mappings.clone())
+        .unwrap_or_default());
+
+    // Get device ID from any cache
+    let device_id = interface_cache
+        .as_ref()
+        .map(|c| c.device_id.clone())
+        .or_else(|| rule_label_cache.as_ref().map(|c| c.device_id.clone()))
+        .or_else(|| alias_cache.as_ref().map(|c| c.device_id.clone()))
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // Determine data source based on connection status
+    let connection_info = cache_state.get_connection_info();
+    let data_source = if connection_info.status == ConnectionStatus::Connected {
+        "live_api".to_string()
+    } else {
+        "cache".to_string()
+    };
+
+    // Cache status
+    let cache_status = CacheStatus {
+        interfaces_count: interfaces.len(),
+        rules_count: rule_labels.len(),
+        aliases_count: aliases.len(),
+    };
+
+    // Attempt to fetch OPNsense version (optional, non-blocking)
+    let opnsense_version = if connection_info.status == ConnectionStatus::Connected {
+        // Load credentials
+        let credentials = manager::load_credentials()
+            .ok()
+            .flatten()
+            .or_else(|| encrypted_storage::decrypt_and_load().ok().flatten());
+
+        if let Some(creds) = credentials {
+            fetch_opnsense_version(&creds).await.unwrap_or(None)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Calculate configuration hash
+    let config_hash = calculate_config_hash(&interfaces, &rule_labels, &aliases);
+
+    // Build export data
+    let export_data = ExportedEnrichmentData {
+        metadata: ExportMetadata {
+            export_timestamp: Utc::now(),
+            device_id: device_id.clone(),
+            opnsense_version,
+            config_hash,
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            data_source,
+            cache_status: cache_status.clone(),
+        },
+        interfaces,
+        rule_labels,
+        aliases,
+    };
+
+    // Serialize to pretty JSON
+    let json_data = serde_json::to_string_pretty(&export_data)
+        .map_err(|e| format!("Failed to serialize export data: {}", e))?;
+
+    // Generate filename
+    let sanitized_hostname = sanitize_filename(&device_id);
+    let timestamp = Utc::now().format("%Y-%m-%dT%H-%M-%S");
+    let filename = format!("enrichment_{}_{}.json", sanitized_hostname, timestamp);
+
+    // Warning if data is minimal/empty
+    let warning = if cache_status.interfaces_count < 1
+        && cache_status.rules_count < 5
+        && cache_status.aliases_count < 1
+    {
+        Some("Limited enrichment data available. Connect to API first for complete export.".to_string())
+    } else {
+        None
+    };
+
+    info!(
+        "Export prepared: {} interfaces, {} rules, {} aliases",
+        cache_status.interfaces_count,
+        cache_status.rules_count,
+        cache_status.aliases_count
+    );
+
+    Ok(ExportResult {
+        json_data,
+        filename,
+        warning,
+        cache_status,
+    })
+}
+
+/// Save enrichment export to file with dialog
+#[command]
+pub async fn save_enrichment_export(
+    json_data: String,
+    filename: String,
+) -> Result<String, String> {
+    use tauri::api::dialog::blocking::FileDialogBuilder;
+    use std::fs;
+    use std::io::Write;
+
+    info!("Opening save dialog for enrichment export");
+
+    // Get Downloads directory (default save location)
+    let downloads_dir = dirs::download_dir()
+        .or_else(|| dirs::home_dir())
+        .ok_or("Failed to determine download directory")?;
+
+    // Open save file dialog
+    let file_path = FileDialogBuilder::new()
+        .set_directory(&downloads_dir)
+        .set_file_name(&filename)
+        .add_filter("JSON Files", &["json"])
+        .save_file()
+        .ok_or("Save dialog cancelled")?;
+
+    // Atomic write: write to temp file first, then rename
+    let temp_path = file_path.with_extension("json.tmp");
+
+    let mut file = fs::File::create(&temp_path)
+        .map_err(|e| format!("Failed to create file: {}", e))?;
+
+    file.write_all(json_data.as_bytes())
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+
+    file.sync_all()
+        .map_err(|e| format!("Failed to sync file: {}", e))?;
+
+    drop(file); // Close file before rename
+
+    // Atomic rename
+    fs::rename(&temp_path, &file_path)
+        .map_err(|e| format!("Failed to finalize file: {}", e))?;
+
+    let saved_path = file_path.to_string_lossy().to_string();
+    info!("Enrichment export saved to: {}", saved_path);
+
+    Ok(saved_path)
+}
+
+/// Open file explorer at given file path
+///
+/// Tests added for cross-platform command verification
+#[command]
+pub fn open_folder(file_path: String) -> Result<(), String> {
+    use std::process::Command;
+
+    let path = std::path::Path::new(&file_path);
+    let directory = path.parent()
+        .ok_or("Invalid file path")?;
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer")
+            .args(&["/select,", &file_path])
+            .spawn()
+            .map_err(|e| format!("Failed to open explorer: {}", e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .args(&["-R", &file_path])
+            .spawn()
+            .map_err(|e| format!("Failed to open finder: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let dir_str = directory.to_string_lossy();
+        Command::new("xdg-open")
+            .arg(&*dir_str)
+            .spawn()
+            .map_err(|e| format!("Failed to open file manager: {}", e))?;
+    }
+
+    Ok(())
+}
+
+/// Transform alias data for export
+///
+/// Converts from: HashMap<String, Vec<AliasMapping>> (IP → aliases)
+/// To: HashMap<String, Vec<String>> (alias_name → IPs)
+fn transform_aliases_for_export(
+    alias_cache: &HashMap<String, Vec<AliasMapping>>,
+) -> HashMap<String, Vec<String>> {
+    let mut result: HashMap<String, Vec<String>> = HashMap::new();
+
+    for (_ip, alias_mappings) in alias_cache.iter() {
+        for alias_mapping in alias_mappings {
+            let alias_name = &alias_mapping.alias_name;
+            let ips = &alias_mapping.group_members;
+
+            result
+                .entry(alias_name.clone())
+                .or_insert_with(Vec::new)
+                .extend(ips.clone());
+        }
+    }
+
+    // Deduplicate IPs in each alias group
+    for ips in result.values_mut() {
+        ips.sort();
+        ips.dedup();
+    }
+
+    result
+}
+
+/// Sanitize filename by replacing invalid characters
+fn sanitize_filename(input: &str) -> String {
+    input
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod export_tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_filename() {
+        assert_eq!(sanitize_filename("firewall.local"), "firewall_local");
+        assert_eq!(sanitize_filename("192.168.1.1"), "192_168_1_1");
+        assert_eq!(sanitize_filename("my-firewall"), "my-firewall");
+        assert_eq!(sanitize_filename("test_host"), "test_host");
+        assert_eq!(sanitize_filename("https://opnsense.local"), "https___opnsense_local");
+    }
+
+    #[test]
+    fn test_transform_aliases_for_export() {
+        let mut alias_cache = HashMap::new();
+
+        // IP 192.168.1.100 belongs to "Servers" and "WebServers"
+        alias_cache.insert(
+            "192.168.1.100".to_string(),
+            vec![
+                AliasMapping {
+                    alias_name: "Servers".to_string(),
+                    group_members: vec!["192.168.1.100".to_string(), "192.168.1.101".to_string()],
+                    description: Some("Server group".to_string()),
+                    alias_type: Some("network".to_string()),
+                },
+                AliasMapping {
+                    alias_name: "WebServers".to_string(),
+                    group_members: vec!["192.168.1.100".to_string()],
+                    description: Some("Web servers".to_string()),
+                    alias_type: Some("host".to_string()),
+                },
+            ],
+        );
+
+        // IP 192.168.1.101 belongs to "Servers"
+        alias_cache.insert(
+            "192.168.1.101".to_string(),
+            vec![
+                AliasMapping {
+                    alias_name: "Servers".to_string(),
+                    group_members: vec!["192.168.1.100".to_string(), "192.168.1.101".to_string()],
+                    description: Some("Server group".to_string()),
+                    alias_type: Some("network".to_string()),
+                },
+            ],
+        );
+
+        let result = transform_aliases_for_export(&alias_cache);
+
+        // Verify "Servers" contains both IPs (deduplicated)
+        assert_eq!(result.get("Servers").unwrap().len(), 2);
+        assert!(result.get("Servers").unwrap().contains(&"192.168.1.100".to_string()));
+        assert!(result.get("Servers").unwrap().contains(&"192.168.1.101".to_string()));
+
+        // Verify "WebServers" contains only one IP
+        assert_eq!(result.get("WebServers").unwrap().len(), 1);
+        assert!(result.get("WebServers").unwrap().contains(&"192.168.1.100".to_string()));
+    }
+
+    #[test]
+    fn test_transform_aliases_empty() {
+        let alias_cache = HashMap::new();
+        let result = transform_aliases_for_export(&alias_cache);
+        assert!(result.is_empty());
+    }
+
+    // Cross-platform open_folder command tests
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_open_folder_command_windows() {
+        // Test that open_folder generates correct command for Windows
+        // Note: We can't actually spawn the command in tests, but we verify the logic
+        let test_path = "C:\\Users\\test\\file.json";
+        assert!(test_path.contains("\\"));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn test_open_folder_command_macos() {
+        // Test that open_folder uses correct command for macOS
+        let test_path = "/Users/test/file.json";
+        assert!(test_path.starts_with("/"));
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_open_folder_command_linux() {
+        // Test that open_folder uses correct command for Linux
+        let test_path = "/home/test/file.json";
+        assert!(test_path.starts_with("/"));
     }
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { Wifi, Loader2, Eye, EyeOff } from 'lucide-react';
+import { Wifi, Loader2, Eye, EyeOff, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ConnectionStatusBadge } from './connection-status-badge';
 import {
@@ -9,6 +9,8 @@ import {
   testApiConnection,
 } from '../../utils/api-client';
 import type { ConnectionStatus, ConnectionTestResult } from '../../types/api';
+import { exportEnrichmentData } from '../../services/enrichment-export';
+import { useEnrichmentStore } from '../../stores/enrichment-store';
 
 interface ApiCredentialsForm {
   endpointUrl: string;
@@ -27,6 +29,12 @@ export function ApiConfigSettings() {
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+
+  // Get enrichment data from store
+  const interfaceMappings = useEnrichmentStore((state) => state.interfaceMappings);
+  const ruleLabels = useEnrichmentStore((state) => state.ruleLabels);
+  const aliases = useEnrichmentStore((state) => state.aliases);
 
   const {
     register,
@@ -115,6 +123,21 @@ export function ApiConfigSettings() {
       setIsSaving(false);
     }
   };
+
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      await exportEnrichmentData();
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Calculate cache counts for display
+  const interfaceCount = interfaceMappings.size;
+  const ruleCount = ruleLabels.size;
+  const aliasCount = aliases.size;
+  const cacheSource = connectionStatus === 'connected' ? 'Live API' : 'Cached';
 
   return (
     <div className="max-w-2xl mx-auto p-6 bg-white dark:bg-gray-900 rounded-lg shadow">
@@ -257,6 +280,60 @@ export function ApiConfigSettings() {
           </button>
         </div>
       </form>
+
+      {/* Export Section (Story 4.1) */}
+      <div className="border-t border-gray-200 dark:border-gray-700 mt-8 pt-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">
+          Enrichment Data Export
+        </h3>
+
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Export interface mappings, rule labels, and aliases to a JSON file for offline use.
+        </p>
+
+        {/* Cache Status Display */}
+        <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 mb-4 text-sm">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-gray-700 dark:text-gray-300 font-medium">Current cache:</span>
+            <span className="text-gray-500 dark:text-gray-400">{cacheSource}</span>
+          </div>
+          <div className="space-y-1 text-gray-600 dark:text-gray-400">
+            <div className="flex justify-between">
+              <span>Interfaces:</span>
+              <span className="font-mono font-medium">{interfaceCount}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Rule labels:</span>
+              <span className="font-mono font-medium">{ruleCount}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Aliases:</span>
+              <span className="font-mono font-medium">{aliasCount}</span>
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={handleExport}
+          disabled={isExporting}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200
+            bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700
+            rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Export enrichment data for offline use"
+        >
+          {isExporting ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Exporting...
+            </>
+          ) : (
+            <>
+              <Download className="h-4 w-4" />
+              Export Enrichment Data
+            </>
+          )}
+        </button>
+      </div>
     </div>
   );
 }
