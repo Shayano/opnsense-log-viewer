@@ -110,85 +110,127 @@ development_status:
     5-2-full-dataset-export-with-streaming: done
     5-3-export-integrity-verification: done
     epic-5-retrospective: optional
-    epic-6: in-progress # Performance & Memory Optimization - CRITICAL NFR violation fix
-    6-1-memory-efficient-large-file-indexation: in-progress # CRITICAL: 23GB RAM for 14GB file - must fix
+    epic-6: in-progress # Memory-Efficient Large File Processing - NFR-001.4 & NFR-001.6
+    6-1-memory-efficient-large-file-indexation: done # Tasks 1-3 COMPLETE: streaming.rs, interner.rs, tiered.rs
+    6-2-rkyv-zero-copy-serialization-foundation: done # Tasks 1-7 COMPLETE + Code Review APPROVED (3 HIGH issues fixed)
+    6-3-progressive-indexation-with-early-filtering: backlog # Tasks 8-10: Filter after ~1 minute, memory <2GB
+    6-4-persistent-index-cache-for-instant-reload: backlog # Tasks 11-13: Cache hit <500ms reload
+    6-5-progressive-loading-ui-feedback: backlog # Tasks 16-18: UI progress, partial filter badge
+    6-6-performance-validation-and-testing: backlog # Tasks 19-22: Benchmarks, integration tests
     epic-6-retrospective: optional
 
 # ============================================================================
-# PROJECT STATUS SUMMARY (Updated: 2026-01-19 - Story 0-5 Complete)
+
+# PROJECT STATUS SUMMARY (Updated: 2026-01-21 - Epic 6 Stories Defined)
+
 # ============================================================================
+
 #
-# ✅ EPICS: 6/6 COMPLETE (Epic 0 foundation complete)
-# ✅ STORIES: 23/23 COMPLETE (Story 0-5 Tauri v2 migration done)
-# ✅ PHASE 2 TEST IMPLEMENTATION COMPLETE (84 new tests, 100% passing)
-# ✅ PRE-EXISTING TEST FIXES COMPLETE (11 tests fixed, 100% passing)
+
+# EPICS STATUS:
+
+# =============
+
+# ✅ Epic 0: Development Foundation - COMPLETE (6 stories)
+
+# ✅ Epic 1: Core Log Investigation - COMPLETE (7 stories)
+
+# ✅ Epic 2: Advanced Filtering & Search - COMPLETE (4 stories)
+
+# ✅ Epic 3: Enhanced Context API Enrichment - COMPLETE (5 stories)
+
+# ✅ Epic 4: Offline Enrichment - COMPLETE (3 stories)
+
+# ✅ Epic 5: Export & Reporting - COMPLETE (3 stories)
+
+# 🔄 Epic 6: Memory-Efficient Large Files - IN PROGRESS (2/6 stories done + code reviewed)
+
 #
-# TEST SUITE STATUS:
-# ==================
-# - Total Test Files: 30/30 passing (100%)
-# - Total Tests: 353/353 passing (100%)
-# - Phase 2 New Tests: 84/84 passing (100%)
-# - Pre-existing Tests Fixed: 11/11 (100%)
-#
-# PHASE 2 TEST BREAKDOWN:
+
+# STORIES: 25/29 COMPLETE
+
 # =======================
-# Story 2.3 (Filter Management): 45 tests ✅
-#   - Component tests: 36 (SavedFiltersSection, Modals, Dialogs)
-#   - Integration tests: 9 (Save/Load/Execute workflows, FIFO, persistence)
-#   - Features: Data versioning/migration, localStorage persistence
+
+# - Epics 0-5: 23 stories complete
+
+# - Epic 6: 2/6 stories complete (Story 6.1-6.2 done, 6.3-6.6 backlog)
+
 #
-# Story 3.3 (Rule Label Enrichment): 9 tests ✅
-#   - Utility tests: 4 (extractUniqueRuleHashes)
-#   - Hook tests: 5 (useRuleLabel with enrichment and fallbacks)
+
+# EPIC 6 STORY STATUS:
+
+# ====================
+
+# ✅ 6.1 Memory-Efficient Indexation - DONE (streaming.rs, interner.rs, tiered.rs)
+
+# ✅ 6.2 rkyv Zero-Copy Serialization - DONE + CODE REVIEWED (rkyv for all index types)
+
+# ⏳ 6.3 Progressive Indexation - BACKLOG (filter after ~1 minute)
+
+# ⏳ 6.4 Persistent Index Cache - BACKLOG (reload <500ms)
+
+# ⏳ 6.5 Progressive Loading UI - BACKLOG (real-time feedback)
+
+# ⏳ 6.6 Performance Validation - BACKLOG (benchmarks & tests)
+
 #
-# Story 4.2 (Enrichment Import): 9 tests + 2 critical bugs fixed ✅
-#   - Service tests: 9 (validation, staleness, errors, cancellation)
-#   - Bugs fixed: setRuleLabels/setAliases Map→Record conversion errors
+
+# RECOMMENDED IMPLEMENTATION ORDER:
+
+# =================================
+
+# Story 6.2 (rkyv Foundation)
+
+#     ↓
+
+# ┌───┴───┬───────┐
+
+# ↓       ↓       ↓
+
+# 6.3     6.4     6.5
+
+# (Progressive) (Cache) (UI)
+
+#     ↓       ↓       ↓
+
+#     └───────┼───────┘
+
+#             ↓
+
+#         Story 6.6
+
+#       (Validation)
+
 #
-# Story 1.6 (Entry Detail View): 8 tests ✅
-#   - Integration tests: 8 (copy workflows, open/close, entry switching)
+
+# TEST SUITE STATUS:
+
+# ==================
+
+# - Total Test Files: 30/30 passing (100%)
+
+# - Total Tests: 353/353 passing (100%)
+
+# - Frontend: ✅ TypeScript build passing
+
+# - Backend: ✅ Rust build passing
+
 #
-# Story 4.1 (Enrichment Export): 13 tests ✅
-#   - Integration tests: 7 (export workflows, warnings, cancellation)
-#   - Performance tests: 3 (large datasets, concurrent operations)
-#   - Workflow tests: 3 (complete workflows with interruptions)
-#
-# PRE-EXISTING TEST FIXES (Commit: ed7f146):
-# ===========================================
-# - filter-builder.test.tsx: 8 tests fixed (getByText → getByRole)
-# - filter-sidebar.test.tsx: 3 tests fixed (regex, dialogs, mocks)
-# - search-history-section.test.tsx: 1 test fixed (queryByRole)
-#
+
 # WHAT'S NEXT:
+
 # ============
-# 1. ✅ Story 0-5 (Tauri v2 Migration API Fixes) - COMPLETE
-#    - ✅ Fixed 15 Rust compilation errors
-#    - ✅ Migrated to tauri_plugin_dialog::DialogExt
-#    - ✅ Added tracing dependencies
-#    - ✅ Added tokio "macros" feature
-#    - ✅ Fixed type inference and ownership errors
-#    - ✅ Backend builds successfully (25 warnings acceptable)
+
+# 1. Stories 6.3, 6.4, 6.5 can now be implemented in parallel (6.2 dependency met)
+
+#    - 6.3: Progressive Indexation - filter after ~1 minute
+
+#    - 6.4: Persistent Index Cache - reload <500ms
+
+#    - 6.5: Progressive Loading UI - real-time feedback
+
+#    - Use: /bmad:bmm:workflows:dev-story 6.3 (or 6.4, 6.5)
+
 #
-# 2. (Optional) Address Story 3-4 test coverage improvements:
-#    - Backend HTTP mock tests (network errors, auth failures)
-#    - Integration tests (5 end-to-end scenarios)
-#    - Performance tests (100 IPs <10s, table render <500ms)
-#    - These are OPTIONAL for production hardening
-#
-# 3. (Optional) Run retrospectives for completed epics
-#    - Use: /bmad:bmm:workflows:retrospective
-#    - Purpose: Extract lessons learned, identify improvements
-#
-# 4. Push commits to remote repository
-#    - Branch: tauri-rewrite (commits ahead of origin)
-#    - Command: git push origin tauri-rewrite
-#
-# 5. Create pull request to main branch
-#    - Use: gh pr create
-#    - Review comprehensive implementation and test results
-#
-# PROJECT COMPLETION STATUS: ✅ 100% COMPLETE
-# ==============================================
-# 23/23 stories complete. All foundation and feature epics done.
-# Frontend: ✅ TypeScript build passing (Story 0-4 complete)
-# Backend: ✅ Rust build passing (Story 0-5 complete, 25 warnings acceptable)
+
+# 2. Finally: Story 6.6 validates all performance targets

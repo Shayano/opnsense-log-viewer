@@ -3,9 +3,13 @@ use std::io::{Read, Write};
 use std::path::Path;
 use thiserror::Error;
 use zstd::stream::{Decoder, Encoder};
+use rkyv::Deserialize as RkyvDeserialize;
 
 use crate::storage::integrity::{calculate_checksum, verify_checksum, IntegrityError};
 use crate::types::persisted_index::PersistedIndex;
+use crate::indexer::inverted::InvertedIndex;
+use crate::indexer::bitmap::{BitmapIndex, BitmapIndexRkyv};
+use crate::indexer::offset_table::OffsetTable;
 
 #[derive(Error, Debug)]
 pub enum PersistenceError {
@@ -20,6 +24,9 @@ pub enum PersistenceError {
 
     #[error("Compression error: {0}")]
     CompressionError(String),
+
+    #[error("rkyv validation error: {0}")]
+    RkyvValidationError(String),
 }
 
 /// Save index to disk with Zstd compression (level 1)
@@ -97,6 +104,99 @@ pub fn load_index<P: AsRef<Path>>(index_path: P) -> Result<PersistedIndex, Persi
     verify_checksum(&serialized_for_verification, &stored_checksum)?;
 
     Ok(index)
+}
+
+// ============================================================================
+// Story 6.2: rkyv Zero-Copy Serialization Helpers
+// ============================================================================
+
+/// Serialize InvertedIndex to rkyv bytes with validation
+///
+/// Story 6.2 (AC4): Provides zero-copy serialization for faster index reload
+pub fn serialize_inverted_index_rkyv(index: &InvertedIndex) -> Result<rkyv::AlignedVec, PersistenceError> {
+    rkyv::to_bytes::<_, 256>(index)
+        .map_err(|e| PersistenceError::SerializationError(format!("rkyv serialization failed: {:?}", e)))
+}
+
+/// Deserialize InvertedIndex from rkyv bytes with validation
+///
+/// Story 6.2 (AC4): Provides zero-copy deserialization for faster index reload
+/// Returns the deserialized struct (for full ownership) after validating archived data
+pub fn deserialize_inverted_index_rkyv(bytes: &[u8]) -> Result<InvertedIndex, PersistenceError> {
+    let archived = rkyv::check_archived_root::<InvertedIndex>(bytes)
+        .map_err(|e| PersistenceError::RkyvValidationError(format!("validation failed: {:?}", e)))?;
+
+    archived
+        .deserialize(&mut rkyv::Infallible)
+        .map_err(|e| PersistenceError::SerializationError(format!("rkyv deserialization failed: {:?}", e)))
+}
+
+/// Serialize BitmapIndex to rkyv bytes via BitmapIndexRkyv wrapper
+///
+/// Story 6.2 (AC4): Uses BitmapIndexRkyv to handle RoaringBitmap serialization
+pub fn serialize_bitmap_index_rkyv(index: &BitmapIndex) -> Result<rkyv::AlignedVec, PersistenceError> {
+    let rkyv_format = index.to_rkyv();
+    rkyv::to_bytes::<_, 256>(&rkyv_format)
+        .map_err(|e| PersistenceError::SerializationError(format!("rkyv serialization failed: {:?}", e)))
+}
+
+/// Deserialize BitmapIndex from rkyv bytes via BitmapIndexRkyv wrapper
+///
+/// Story 6.2 (AC4): Uses archived BitmapIndexRkyv for zero-copy access to bitmap data
+pub fn deserialize_bitmap_index_rkyv(bytes: &[u8]) -> Result<BitmapIndex, PersistenceError> {
+    let archived = rkyv::check_archived_root::<BitmapIndexRkyv>(bytes)
+        .map_err(|e| PersistenceError::RkyvValidationError(format!("validation failed: {:?}", e)))?;
+
+    Ok(BitmapIndex::from_archived_rkyv(archived))
+}
+
+/// Serialize OffsetTable to rkyv bytes with validation
+///
+/// Story 6.2 (AC4): Provides zero-copy serialization for faster offset table reload
+pub fn serialize_offset_table_rkyv(table: &OffsetTable) -> Result<rkyv::AlignedVec, PersistenceError> {
+    rkyv::to_bytes::<_, 256>(table)
+        .map_err(|e| PersistenceError::SerializationError(format!("rkyv serialization failed: {:?}", e)))
+}
+
+/// Deserialize OffsetTable from rkyv bytes with validation
+///
+/// Story 6.2 (AC4): Provides zero-copy deserialization for faster offset table reload
+pub fn deserialize_offset_table_rkyv(bytes: &[u8]) -> Result<OffsetTable, PersistenceError> {
+    let archived = rkyv::check_archived_root::<OffsetTable>(bytes)
+        .map_err(|e| PersistenceError::RkyvValidationError(format!("validation failed: {:?}", e)))?;
+
+    archived
+        .deserialize(&mut rkyv::Infallible)
+        .map_err(|e| PersistenceError::SerializationError(format!("rkyv deserialization failed: {:?}", e)))
+}
+
+/// Zero-copy access to archived InvertedIndex (for read-only operations)
+///
+/// Story 6.2: Allows direct access to archived data without deserialization.
+/// The returned reference has the same lifetime as the input bytes.
+///
+/// # Safety
+/// This uses rkyv's validation to ensure the bytes are valid before returning.
+pub fn access_inverted_index_rkyv(bytes: &[u8]) -> Result<&rkyv::Archived<InvertedIndex>, PersistenceError> {
+    rkyv::check_archived_root::<InvertedIndex>(bytes)
+        .map_err(|e| PersistenceError::RkyvValidationError(format!("validation failed: {:?}", e)))
+}
+
+/// Zero-copy access to archived OffsetTable (for read-only operations)
+///
+/// Story 6.2: Allows direct access to archived offset data without deserialization.
+pub fn access_offset_table_rkyv(bytes: &[u8]) -> Result<&rkyv::Archived<OffsetTable>, PersistenceError> {
+    rkyv::check_archived_root::<OffsetTable>(bytes)
+        .map_err(|e| PersistenceError::RkyvValidationError(format!("validation failed: {:?}", e)))
+}
+
+/// Zero-copy access to archived BitmapIndexRkyv (for read-only operations)
+///
+/// Story 6.2: Allows direct access to archived bitmap data without deserialization.
+/// Note: Returns BitmapIndexRkyv archived type since BitmapIndex doesn't directly implement rkyv.
+pub fn access_bitmap_index_rkyv(bytes: &[u8]) -> Result<&rkyv::Archived<BitmapIndexRkyv>, PersistenceError> {
+    rkyv::check_archived_root::<BitmapIndexRkyv>(bytes)
+        .map_err(|e| PersistenceError::RkyvValidationError(format!("validation failed: {:?}", e)))
 }
 
 #[cfg(test)]
@@ -234,5 +334,95 @@ mod tests {
 
         // Final file should exist
         assert!(index_path.exists());
+    }
+
+    // ========================================================================
+    // Story 6.2: rkyv Serialization Helper Tests
+    // ========================================================================
+
+    use crate::indexer::inverted::InvertedIndex;
+    use crate::indexer::bitmap::BitmapIndex;
+    use crate::indexer::offset_table::OffsetTable;
+
+    #[test]
+    fn test_rkyv_inverted_index_roundtrip() {
+        let mut index = InvertedIndex::new();
+        for i in 0..1000 {
+            index.add_entry(
+                i,
+                Some(&format!("192.168.1.{}", i % 255)),
+                Some("10.0.0.1"),
+                Some(443),
+                Some(80),
+            );
+        }
+
+        // Serialize
+        let bytes = serialize_inverted_index_rkyv(&index).unwrap();
+        assert!(!bytes.is_empty());
+
+        // Deserialize
+        let deserialized = deserialize_inverted_index_rkyv(&bytes).unwrap();
+        assert_eq!(
+            index.query_source_ip("192.168.1.0"),
+            deserialized.query_source_ip("192.168.1.0")
+        );
+
+        // Zero-copy access - just verify it works (can't access private fields)
+        let _archived = access_inverted_index_rkyv(&bytes).unwrap();
+    }
+
+    #[test]
+    fn test_rkyv_bitmap_index_roundtrip() {
+        let mut index = BitmapIndex::new();
+        for i in 0..1000 {
+            let action = if i % 2 == 0 { "block" } else { "pass" };
+            index.add_entry(i, Some(action), Some("TCP"), Some("vtnet0"));
+        }
+
+        // Serialize
+        let bytes = serialize_bitmap_index_rkyv(&index).unwrap();
+        assert!(!bytes.is_empty());
+
+        // Deserialize
+        let deserialized = deserialize_bitmap_index_rkyv(&bytes).unwrap();
+        assert_eq!(
+            index.query_action("block").unwrap().len(),
+            deserialized.query_action("block").unwrap().len()
+        );
+    }
+
+    #[test]
+    fn test_rkyv_offset_table_roundtrip() {
+        let mut table = OffsetTable::new();
+        for i in 0..10000 {
+            table.add_offset(i, i * 100);
+        }
+
+        // Serialize
+        let bytes = serialize_offset_table_rkyv(&table).unwrap();
+        assert!(!bytes.is_empty());
+
+        // Deserialize
+        let deserialized = deserialize_offset_table_rkyv(&bytes).unwrap();
+        assert_eq!(table.get_offset(5000), deserialized.get_offset(5000));
+        assert_eq!(deserialized.len(), 10000);
+
+        // Zero-copy access - just verify it works
+        let _archived = access_offset_table_rkyv(&bytes).unwrap();
+    }
+
+    #[test]
+    fn test_rkyv_validation_rejects_invalid_bytes() {
+        let invalid_bytes = b"this is not valid rkyv data";
+
+        let result = deserialize_inverted_index_rkyv(invalid_bytes);
+        assert!(result.is_err());
+
+        let result = deserialize_bitmap_index_rkyv(invalid_bytes);
+        assert!(result.is_err());
+
+        let result = deserialize_offset_table_rkyv(invalid_bytes);
+        assert!(result.is_err());
     }
 }

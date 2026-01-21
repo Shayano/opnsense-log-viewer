@@ -18,8 +18,11 @@ use std::path::{Path, PathBuf};
 use memmap2::Mmap;
 use roaring::RoaringBitmap;
 use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Serialize as RkyvSerialize, Deserialize as RkyvDeserialize};
+use rkyv::Deserialize as _;
+use bytecheck::CheckBytes;
 
-use crate::indexer::bitmap::BitmapIndex;
+use crate::indexer::bitmap::{BitmapIndex, BitmapIndexRkyv};
 use crate::indexer::hybrid::IndexError;
 use crate::indexer::inverted::InvertedIndex;
 use crate::indexer::offset_table::OffsetTable;
@@ -91,6 +94,9 @@ impl TieredConfig {
 ///
 /// Contains the same structure as HybridIndex but only holds
 /// the most recent N entries for fast in-memory access.
+///
+/// Note: Uses separate HotIndexRkyv for rkyv serialization due to BitmapIndex
+/// requiring a custom wrapper for RoaringBitmap.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HotIndex {
     /// Inverted index for IP addresses and ports
@@ -103,6 +109,62 @@ pub struct HotIndex {
     pub entry_range: (u64, u64),
     /// Number of entries in hot tier
     pub entry_count: u64,
+}
+
+/// Story 6.2: rkyv-serializable representation of HotIndex
+#[derive(Archive, RkyvSerialize, RkyvDeserialize)]
+#[archive_attr(derive(CheckBytes))]
+pub struct HotIndexRkyv {
+    pub inverted_index: InvertedIndex,
+    pub bitmap_index: BitmapIndexRkyv,
+    pub offset_table: OffsetTable,
+    pub entry_range: (u64, u64),
+    pub entry_count: u64,
+}
+
+impl HotIndexRkyv {
+    /// Convert from HotIndex to rkyv-serializable format
+    pub fn from_hot_index(index: &HotIndex) -> Self {
+        Self {
+            inverted_index: index.inverted_index.clone(),
+            bitmap_index: index.bitmap_index.to_rkyv(),
+            offset_table: index.offset_table.clone(),
+            entry_range: index.entry_range,
+            entry_count: index.entry_count,
+        }
+    }
+
+    /// Convert to HotIndex from rkyv-serializable format
+    pub fn to_hot_index(&self) -> HotIndex {
+        HotIndex {
+            inverted_index: self.inverted_index.clone(),
+            bitmap_index: BitmapIndex::from_rkyv(&self.bitmap_index),
+            offset_table: self.offset_table.clone(),
+            entry_range: self.entry_range,
+            entry_count: self.entry_count,
+        }
+    }
+}
+
+impl ArchivedHotIndexRkyv {
+    /// Convert from archived format to HotIndex
+    pub fn to_hot_index(&self) -> HotIndex {
+        let inverted: InvertedIndex = self.inverted_index
+            .deserialize(&mut rkyv::Infallible)
+            .expect("InvertedIndex deserialization");
+
+        let offset: OffsetTable = self.offset_table
+            .deserialize(&mut rkyv::Infallible)
+            .expect("OffsetTable deserialization");
+
+        HotIndex {
+            inverted_index: inverted,
+            bitmap_index: BitmapIndex::from_archived_rkyv(&self.bitmap_index),
+            offset_table: offset,
+            entry_range: (self.entry_range.0, self.entry_range.1),
+            entry_count: self.entry_count,
+        }
+    }
 }
 
 impl HotIndex {
@@ -208,7 +270,10 @@ impl Default for HotIndex {
 }
 
 /// Warm tier file header
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Story 6.2: Added rkyv derives for zero-copy header access
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[archive_attr(derive(CheckBytes))]
 struct WarmTierHeader {
     /// Magic bytes for file identification
     magic: [u8; 8],
@@ -285,6 +350,8 @@ pub struct WarmIndex {
 
 impl WarmIndex {
     /// Create a new warm index from existing indexes
+    ///
+    /// Story 6.2: Uses rkyv for faster serialization
     pub fn create<P: AsRef<Path>>(
         path: P,
         inverted: &InvertedIndex,
@@ -303,21 +370,26 @@ impl WarmIndex {
         let file = File::create(path)?;
         let mut writer = BufWriter::with_capacity(256 * 1024, file);
 
-        // Serialize components
-        let inverted_data = bincode::serde::encode_to_vec(inverted, bincode::config::standard())
-            .map_err(|e| IndexError::SerializationError(e.to_string()))?;
+        // Story 6.2: Serialize components with rkyv
+        let inverted_data = rkyv::to_bytes::<_, 256>(inverted)
+            .map_err(|e| IndexError::SerializationError(format!("rkyv serialization failed: {:?}", e)))?;
 
-        let bitmap_data = bincode::serde::encode_to_vec(bitmap, bincode::config::standard())
-            .map_err(|e| IndexError::SerializationError(e.to_string()))?;
+        // BitmapIndex requires conversion to BitmapIndexRkyv first
+        let bitmap_rkyv = bitmap.to_rkyv();
+        let bitmap_data = rkyv::to_bytes::<_, 256>(&bitmap_rkyv)
+            .map_err(|e| IndexError::SerializationError(format!("rkyv serialization failed: {:?}", e)))?;
 
-        let offsets_data = bincode::serde::encode_to_vec(offsets, bincode::config::standard())
-            .map_err(|e| IndexError::SerializationError(e.to_string()))?;
+        let offsets_data = rkyv::to_bytes::<_, 256>(offsets)
+            .map_err(|e| IndexError::SerializationError(format!("rkyv serialization failed: {:?}", e)))?;
 
         // Calculate offsets (header size = 128 bytes for future expansion)
+        // Story 6.2: Ensure 8-byte alignment for each section (required by rkyv)
         let header_size = 128u64;
         let inverted_offset = header_size;
-        let bitmap_offset = inverted_offset + inverted_data.len() as u64;
-        let offset_table_offset = bitmap_offset + bitmap_data.len() as u64;
+        let inverted_end = inverted_offset + inverted_data.len() as u64;
+        let bitmap_offset = (inverted_end + 7) & !7; // Align to 8 bytes
+        let bitmap_end = bitmap_offset + bitmap_data.len() as u64;
+        let offset_table_offset = (bitmap_end + 7) & !7; // Align to 8 bytes
 
         // Build header
         let mut header = WarmTierHeader::new(start_id, end_id);
@@ -328,23 +400,40 @@ impl WarmIndex {
         header.offset_table_offset = offset_table_offset;
         header.offset_table_size = offsets_data.len() as u64;
 
-        // Serialize header (fixed 128 bytes)
-        let header_data = bincode::serde::encode_to_vec(&header, bincode::config::standard())
-            .map_err(|e| IndexError::SerializationError(e.to_string()))?;
+        // Story 6.2: Serialize header with rkyv
+        // Note: We write the exact rkyv bytes, then pad to maintain the 128-byte header region
+        let header_data = rkyv::to_bytes::<_, 64>(&header)
+            .map_err(|e| IndexError::SerializationError(format!("rkyv serialization failed: {:?}", e)))?;
 
-        // Write header with padding
-        writer.write_all(&header_data)?;
-        let padding = vec![0u8; header_size as usize - header_data.len()];
+        // Write header bytes - pad BEFORE the rkyv data to maintain alignment at end
+        // rkyv expects the root pointer at the end of the buffer
+        let header_len = header_data.len();
+        let padding_before = header_size as usize - header_len;
+        let padding = vec![0u8; padding_before];
         writer.write_all(&padding)?;
+        writer.write_all(&header_data)?;
 
-        // Write index data
+        // Write index data with alignment padding
+        // Story 6.2: Ensure 8-byte alignment for rkyv data
         writer.write_all(&inverted_data)?;
+
+        // Pad to align bitmap data to 8 bytes
+        let bitmap_padding = (bitmap_offset - inverted_end) as usize;
+        if bitmap_padding > 0 {
+            writer.write_all(&vec![0u8; bitmap_padding])?;
+        }
         writer.write_all(&bitmap_data)?;
+
+        // Pad to align offset table data to 8 bytes
+        let offsets_padding = (offset_table_offset - bitmap_end) as usize;
+        if offsets_padding > 0 {
+            writer.write_all(&vec![0u8; offsets_padding])?;
+        }
         writer.write_all(&offsets_data)?;
         writer.flush()?;
 
         log::info!(
-            "[WARM] Created warm tier file: {} ({} bytes, entries {}-{})",
+            "[WARM] Created warm tier file (rkyv): {} ({} bytes, entries {}-{})",
             path.display(),
             header_size + inverted_data.len() as u64 + bitmap_data.len() as u64 + offsets_data.len() as u64,
             start_id,
@@ -356,6 +445,8 @@ impl WarmIndex {
     }
 
     /// Open an existing warm tier file
+    ///
+    /// Story 6.2: Uses rkyv for zero-copy header access
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, IndexError> {
         let path = path.as_ref();
         let file = File::open(path)?;
@@ -368,9 +459,26 @@ impl WarmIndex {
             ));
         }
 
-        let (header, _): (WarmTierHeader, _) =
-            bincode::serde::decode_from_slice(&mmap[..128], bincode::config::standard())
-                .map_err(|e| IndexError::SerializationError(e.to_string()))?;
+        // Determine the actual header data size by finding where rkyv data ends
+        // rkyv writes the root pointer at the end, so we need to read from the proper position
+        let header_data = &mmap[..128];
+
+        // Story 6.2: Try rkyv first by checking from the end of the buffer
+        // rkyv stores the root at the end of the buffer
+        let header = match rkyv::check_archived_root::<WarmTierHeader>(header_data) {
+            Ok(archived) => {
+                archived.deserialize(&mut rkyv::Infallible)
+                    .map_err(|e| IndexError::SerializationError(format!("rkyv deserialization failed: {:?}", e)))?
+            }
+            Err(rkyv_err) => {
+                // Fallback to bincode for files created before Story 6.2
+                log::debug!("[WARM] rkyv header parsing failed ({:?}), trying bincode fallback", rkyv_err);
+                let (header, _): (WarmTierHeader, _) =
+                    bincode::serde::decode_from_slice(header_data, bincode::config::standard())
+                        .map_err(|e| IndexError::SerializationError(e.to_string()))?;
+                header
+            }
+        };
 
         header.validate()?;
 
@@ -430,6 +538,8 @@ impl WarmIndex {
     }
 
     /// Load inverted index from mmap (lazy loading)
+    ///
+    /// Story 6.2: Uses rkyv for zero-copy deserialization with bincode fallback
     fn load_inverted(&mut self) -> Result<&InvertedIndex, IndexError> {
         if self.cached_inverted.is_none() {
             let mmap = self.mmap.as_ref().ok_or_else(|| {
@@ -442,9 +552,20 @@ impl WarmIndex {
             let start = self.header.inverted_offset as usize;
             let end = start + self.header.inverted_size as usize;
 
-            let (inverted, _): (InvertedIndex, _) =
-                bincode::serde::decode_from_slice(&mmap[start..end], bincode::config::standard())
-                    .map_err(|e| IndexError::SerializationError(e.to_string()))?;
+            // Story 6.2: Try rkyv first, fallback to bincode for backwards compatibility
+            let inverted = match rkyv::check_archived_root::<InvertedIndex>(&mmap[start..end]) {
+                Ok(archived) => {
+                    archived.deserialize(&mut rkyv::Infallible)
+                        .map_err(|e| IndexError::SerializationError(format!("rkyv deserialization failed: {:?}", e)))?
+                }
+                Err(_) => {
+                    log::debug!("[WARM] rkyv inverted index parsing failed, trying bincode fallback");
+                    let (inverted, _): (InvertedIndex, _) =
+                        bincode::serde::decode_from_slice(&mmap[start..end], bincode::config::standard())
+                            .map_err(|e| IndexError::SerializationError(e.to_string()))?;
+                    inverted
+                }
+            };
 
             self.cached_inverted = Some(inverted);
         }
@@ -452,6 +573,8 @@ impl WarmIndex {
     }
 
     /// Load bitmap index from mmap (lazy loading)
+    ///
+    /// Story 6.2: Uses rkyv for zero-copy deserialization with bincode fallback
     fn load_bitmap(&mut self) -> Result<&BitmapIndex, IndexError> {
         if self.cached_bitmap.is_none() {
             let mmap = self.mmap.as_ref().ok_or_else(|| {
@@ -464,9 +587,19 @@ impl WarmIndex {
             let start = self.header.bitmap_offset as usize;
             let end = start + self.header.bitmap_size as usize;
 
-            let (bitmap, _): (BitmapIndex, _) =
-                bincode::serde::decode_from_slice(&mmap[start..end], bincode::config::standard())
-                    .map_err(|e| IndexError::SerializationError(e.to_string()))?;
+            // Story 6.2: Try rkyv first (via BitmapIndexRkyv), fallback to bincode
+            let bitmap = match rkyv::check_archived_root::<BitmapIndexRkyv>(&mmap[start..end]) {
+                Ok(archived) => {
+                    BitmapIndex::from_archived_rkyv(archived)
+                }
+                Err(_) => {
+                    log::debug!("[WARM] rkyv bitmap index parsing failed, trying bincode fallback");
+                    let (bitmap, _): (BitmapIndex, _) =
+                        bincode::serde::decode_from_slice(&mmap[start..end], bincode::config::standard())
+                            .map_err(|e| IndexError::SerializationError(e.to_string()))?;
+                    bitmap
+                }
+            };
 
             self.cached_bitmap = Some(bitmap);
         }
@@ -474,6 +607,8 @@ impl WarmIndex {
     }
 
     /// Load offset table from mmap (lazy loading)
+    ///
+    /// Story 6.2: Uses rkyv for zero-copy deserialization with bincode fallback
     fn load_offsets(&mut self) -> Result<&OffsetTable, IndexError> {
         if self.cached_offsets.is_none() {
             let mmap = self.mmap.as_ref().ok_or_else(|| {
@@ -486,9 +621,20 @@ impl WarmIndex {
             let start = self.header.offset_table_offset as usize;
             let end = start + self.header.offset_table_size as usize;
 
-            let (offsets, _): (OffsetTable, _) =
-                bincode::serde::decode_from_slice(&mmap[start..end], bincode::config::standard())
-                    .map_err(|e| IndexError::SerializationError(e.to_string()))?;
+            // Story 6.2: Try rkyv first, fallback to bincode for backwards compatibility
+            let offsets = match rkyv::check_archived_root::<OffsetTable>(&mmap[start..end]) {
+                Ok(archived) => {
+                    archived.deserialize(&mut rkyv::Infallible)
+                        .map_err(|e| IndexError::SerializationError(format!("rkyv deserialization failed: {:?}", e)))?
+                }
+                Err(_) => {
+                    log::debug!("[WARM] rkyv offset table parsing failed, trying bincode fallback");
+                    let (offsets, _): (OffsetTable, _) =
+                        bincode::serde::decode_from_slice(&mmap[start..end], bincode::config::standard())
+                            .map_err(|e| IndexError::SerializationError(e.to_string()))?;
+                    offsets
+                }
+            };
 
             self.cached_offsets = Some(offsets);
         }
@@ -958,6 +1104,10 @@ mod tests {
     fn test_warm_tier_file_operations() {
         let temp_dir = tempfile::tempdir().unwrap();
         let (inverted, bitmap, offsets) = create_test_indexes(100);
+
+        // Verify original offsets work before serialization
+        assert_eq!(offsets.get_offset(5), Some(500));
+        assert_eq!(offsets.len(), 100);
 
         // Create warm tier
         let warm_path = temp_dir.path().join("test_warm.idx");

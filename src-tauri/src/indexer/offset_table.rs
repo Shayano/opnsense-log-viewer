@@ -1,8 +1,13 @@
 use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Serialize as RkyvSerialize, Deserialize as RkyvDeserialize};
+use bytecheck::CheckBytes;
 
 /// Offset table for random access to raw log lines
 /// Maps entry IDs to byte offsets in the source file
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Story 6.2: Added rkyv derives for zero-copy serialization
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[archive_attr(derive(CheckBytes))]
 pub struct OffsetTable {
     offsets: Vec<u64>,
 }
@@ -93,5 +98,51 @@ mod tests {
         assert_eq!(table.len(), 11); // 0-10
         assert_eq!(table.get_offset(10), Some(1000));
         assert_eq!(table.get_offset(5), Some(0)); // Default value
+    }
+
+    /// Story 6.2 (AC2): rkyv round-trip test with 100K+ entries for OffsetTable
+    #[test]
+    fn test_offset_table_rkyv_roundtrip_100k() {
+        let mut table = OffsetTable::new();
+
+        // Add 100,000 offsets simulating a large log file
+        // Average line is ~200 bytes, so offsets grow by ~200 each
+        let mut offset = 0u64;
+        for i in 0..100_000u64 {
+            table.add_offset(i, offset);
+            offset += 150 + (i % 100); // Varying line lengths
+        }
+
+        // Serialize with rkyv
+        let bytes = rkyv::to_bytes::<_, 256>(&table).expect("rkyv serialization failed");
+
+        // 100K u64s = 800KB + overhead
+        assert!(bytes.len() > 700_000, "Expected significant data for 100K entries");
+        assert!(bytes.len() < 1_500_000, "Serialized data should be reasonably compact");
+
+        // Validate archived data
+        let archived = rkyv::check_archived_root::<OffsetTable>(&bytes)
+            .expect("rkyv validation failed");
+
+        // Verify archived vec has correct length
+        assert_eq!(archived.offsets.len(), 100_000, "Archived should have 100K entries");
+
+        // Deserialize back to regular struct
+        let deserialized: OffsetTable = archived.deserialize(&mut rkyv::Infallible)
+            .expect("rkyv deserialization failed");
+
+        // Verify roundtrip preserves data
+        assert_eq!(table.len(), deserialized.len(), "Length mismatch");
+
+        // Spot check some offsets
+        assert_eq!(table.get_offset(0), deserialized.get_offset(0), "First offset mismatch");
+        assert_eq!(table.get_offset(50_000), deserialized.get_offset(50_000), "Middle offset mismatch");
+        assert_eq!(table.get_offset(99_999), deserialized.get_offset(99_999), "Last offset mismatch");
+
+        // Verify all offsets match
+        for i in 0..100_000u64 {
+            assert_eq!(table.get_offset(i), deserialized.get_offset(i),
+                "Offset mismatch at entry {}", i);
+        }
     }
 }

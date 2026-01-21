@@ -1,9 +1,14 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Serialize as RkyvSerialize, Deserialize as RkyvDeserialize};
+use bytecheck::CheckBytes;
 
 /// Inverted index for high-cardinality fields (IPs, ports)
 /// Maps field values to lists of entry IDs containing that value
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Story 6.2: Added rkyv derives for zero-copy serialization
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[archive_attr(derive(CheckBytes))]
 pub struct InvertedIndex {
     source_ips: HashMap<String, Vec<u64>>,
     dest_ips: HashMap<String, Vec<u64>>,
@@ -184,5 +189,74 @@ mod tests {
 
         // Ensure memory usage is reasonable (<250 MB for inverted index portion)
         assert!(final_usage < 250 * 1024 * 1024);
+    }
+
+    /// Story 6.2 (AC2): rkyv round-trip test with 100K+ entries
+    #[test]
+    fn test_inverted_index_rkyv_roundtrip_100k() {
+        let mut index = InvertedIndex::new();
+
+        // Add 100,000 entries with diverse data
+        for i in 0..100_000u64 {
+            index.add_entry(
+                i,
+                Some(&format!("192.168.{}.{}", (i / 256) % 256, i % 256)),
+                Some(&format!("10.{}.{}.{}", (i / 65536) % 256, (i / 256) % 256, i % 256)),
+                Some((i % 65535) as u16),
+                Some(((i / 2) % 65535) as u16),
+            );
+        }
+
+        // Serialize with rkyv (256-byte alignment for optimal access)
+        let bytes = rkyv::to_bytes::<_, 256>(&index).expect("rkyv serialization failed");
+
+        // Verify serialized data is reasonable size
+        assert!(bytes.len() > 1_000_000, "Expected significant serialized data for 100K entries");
+        assert!(bytes.len() < 100_000_000, "Serialized data should be reasonably compact");
+
+        // Validate archived data integrity via check_archived_root
+        let archived = rkyv::check_archived_root::<InvertedIndex>(&bytes)
+            .expect("rkyv validation failed");
+
+        // Verify archived hashmap has entries (len check works on archived hashmap)
+        assert!(!archived.source_ips.is_empty(), "Archived source_ips should have entries");
+        assert!(!archived.dest_ips.is_empty(), "Archived dest_ips should have entries");
+        assert!(!archived.source_ports.is_empty(), "Archived source_ports should have entries");
+        assert!(!archived.dest_ports.is_empty(), "Archived dest_ports should have entries");
+
+        // Deserialize back to regular struct for verification
+        let deserialized: InvertedIndex = archived.deserialize(&mut rkyv::Infallible)
+            .expect("rkyv deserialization failed");
+
+        // Verify roundtrip preserves data completely
+        // Check IP "192.168.0.0" appears for entries 0, 65536 (every 65536 due to formula)
+        let original_ip = index.query_source_ip("192.168.0.0");
+        let deserialized_ip = deserialized.query_source_ip("192.168.0.0");
+        assert_eq!(original_ip, deserialized_ip, "Source IP data mismatch after roundtrip");
+
+        assert_eq!(
+            index.query_dest_ip("10.0.0.0"),
+            deserialized.query_dest_ip("10.0.0.0"),
+            "Dest IP data mismatch after roundtrip"
+        );
+        assert_eq!(
+            index.query_source_port(443),
+            deserialized.query_source_port(443),
+            "Source port data mismatch after roundtrip"
+        );
+        assert_eq!(
+            index.query_dest_port(80),
+            deserialized.query_dest_port(80),
+            "Dest port data mismatch after roundtrip"
+        );
+
+        // Verify entry counts match
+        let original_source_ip_count: usize = index.source_ips.values().map(|v| v.len()).sum();
+        let deserialized_source_ip_count: usize = deserialized.source_ips.values().map(|v| v.len()).sum();
+        assert_eq!(original_source_ip_count, deserialized_source_ip_count,
+            "Total source IP entry count mismatch");
+
+        // Should have exactly 100,000 entries total
+        assert_eq!(original_source_ip_count, 100_000, "Expected 100K source IP entries");
     }
 }

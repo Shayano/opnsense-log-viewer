@@ -4,6 +4,7 @@ inputDocuments:
   - "_bmad-output/planning-artifacts/prd.md"
   - "_bmad-output/planning-artifacts/architecture.md"
   - "_bmad-output/planning-artifacts/ux-design-specification.md"
+  - "_bmad-output/implementation-artifacts/tech-spec-hybrid-progressive-indexation.md"
 ---
 
 # opnsense-log-viewer - Epic Breakdown
@@ -219,6 +220,12 @@ This document provides the complete epic and story breakdown for opnsense-log-vi
 - NFR-001.4: Memory Efficiency (streaming export)
 - NFR-002.2: Data Integrity (checksum, verification)
 
+**Epic 6: Memory-Efficient Large File Processing**
+- NFR-001.4: Memory Efficiency (improved: <2GB for 14GB+ files)
+- NFR-001.6: Index Load Time (improved: <500ms from cache)
+- Tech-Spec: Progressive indexation, rkyv serialization, persistent cache
+- FR-001.3: Index Persistence & Reuse (enhanced with rkyv cache)
+
 ## Epic List
 
 ### Epic 0: Development Foundation & Quality Infrastructure
@@ -284,6 +291,17 @@ Export filtered results (or complete dataset) to CSV/JSON with comprehensive met
 
 **FRs Covered:** FR-006 (Export & Reporting)
 **NFRs Addressed:** NFR-001.4 (memory efficiency via streaming), NFR-002.2 (data integrity)
+
+---
+
+### Epic 6: Memory-Efficient Large File Processing
+
+Enable network administrators to open very large log files (14GB+, 70M+ entries) with bounded memory usage (<2GB RAM), progressive filtering available after ~1 minute, and instant reload of previously indexed files (~100ms via persistent cache).
+
+**User Outcome:** Marc can open his 14GB filter.log file, see real-time progress, start filtering after just 1 minute while indexation continues, and reload the same file instantly next time. Memory stays bounded throughout, enabling analysis on standard workstations.
+
+**Tech-Spec Reference:** `tech-spec-hybrid-progressive-indexation.md`
+**NFRs Addressed:** NFR-001.4 (memory <2GB), NFR-001.6 (load time <500ms cached)
 
 ---
 
@@ -1806,3 +1824,219 @@ So that I can trust the export data for compliance audits and ensure no corrupti
 - Checksums provide evidence integrity for audits
 - Metadata documents filters and source for traceability
 - Verification process is transparent and reproducible
+
+---
+
+## Epic 6: Memory-Efficient Large File Processing
+
+Enable network administrators to open very large log files (14GB+, 70M+ entries) with bounded memory usage (<2GB RAM), progressive filtering available after ~1 minute, and instant reload of previously indexed files (~100ms via persistent cache).
+
+**User Outcome:** Marc can open his 14GB filter.log file, see real-time progress ("45% - 32M/71M entries - Batch 6/14"), start filtering after just 1 minute while indexation continues in background, and reload the same file instantly next time thanks to persistent cache. Memory stays bounded throughout, enabling analysis on standard workstations.
+
+**NFRs Addressed:** NFR-001.4 (Memory Efficiency - improved from 20GB to <2GB peak), NFR-001.6 (Index Load Time - improved from ~10min to <500ms for cached files)
+
+**Tech-Spec Reference:** `_bmad-output/implementation-artifacts/tech-spec-hybrid-progressive-indexation.md`
+
+---
+
+### Story 6.1: Memory-Efficient Large File Indexation *(Existing - Tasks 1-3 Complete)*
+
+As a network administrator,
+I want large log files to be indexed using streaming batch processing with string interning,
+So that memory usage remains bounded and doesn't crash my workstation.
+
+**Status:** Tasks 1-3 COMPLETED (streaming.rs, interner.rs, tiered.rs implemented)
+**Remaining:** Tasks 4-6 replaced by Stories 6.2-6.6
+
+---
+
+### Story 6.2: rkyv Zero-Copy Serialization Foundation
+
+As a developer,
+I want index serialization migrated from bincode to rkyv with zero-copy deserialization,
+So that index loading achieves <100ms for 70M entries and enables the cache system.
+
+**Acceptance Criteria:**
+
+**Given** the rkyv crate is added to Cargo.toml
+**When** I derive rkyv traits on InvertedIndex, BitmapIndex, and OffsetTable
+**Then** all index types support Archive, Serialize, and Deserialize traits
+**And** RoaringBitmap uses a custom wrapper for byte serialization
+
+**Given** the streaming.rs batch serialization uses bincode
+**When** I migrate save_batch_to_disk() and load_batch_from_disk() to rkyv
+**Then** batch files use rkyv format with validation on load
+**And** file magic bytes "OPNSRKYV" identify the format
+
+**Given** the tiered.rs WarmIndex uses bincode
+**When** I migrate WarmIndex::create() and lazy-load methods to rkyv
+**Then** warm tier files support zero-copy access from mmap
+**And** no full deserialization is required for queries
+
+**And** all existing tests continue to pass
+**And** index round-trip tests verify serialization correctness
+
+**Tasks:** 1-7, 14-15 from tech-spec (Phases 1, 2, 5)
+
+---
+
+### Story 6.3: Progressive Indexation with Early Filtering
+
+As a network administrator,
+I want to start filtering logs after the first batch completes (~1 minute),
+So that I can begin my investigation immediately without waiting for full indexation.
+
+**Acceptance Criteria:**
+
+**Given** a 14GB log file is being indexed
+**When** the first batch (~1GB) completes processing
+**Then** the UI shows "Partial filtering available"
+**And** I can apply filters to the indexed portion
+**And** results update as more batches complete
+
+**Given** progressive indexation is running
+**When** I observe memory usage
+**Then** peak RAM stays below 2GB throughout the entire process
+**And** each batch is written to warm tier before processing next batch
+
+**Given** IndexProgress struct exists
+**When** I extend it for progressive availability
+**Then** it includes: entries_indexed, total_entries_estimated, partial_filter_available, batches_completed, total_batches
+
+**Given** the streaming merge phase accumulates in RAM
+**When** I refactor to use TieredIndex output
+**Then** older entries are written to WarmIndex incrementally
+**And** only the last 5M entries remain in HotIndex
+
+**And** the ProgressiveIndex wrapper is thread-safe (Arc<RwLock<TieredIndex>>)
+**And** queries on partial index return results for indexed portion only
+
+**Tasks:** 8-10 from tech-spec (Phase 3)
+
+---
+
+### Story 6.4: Persistent Index Cache for Instant Reload
+
+As a network administrator,
+I want previously indexed files to reload instantly from cache,
+So that I don't wait 10 minutes every time I reopen the same log file.
+
+**Acceptance Criteria:**
+
+**Given** a log file was previously indexed
+**When** I open the same file again (unchanged)
+**Then** the index loads from cache in <500ms
+**And** the UI shows "Loaded from cache"
+**And** the "index-cache-hit" event is emitted
+
+**Given** a cached index exists for a file
+**When** the file content changes (different hash)
+**Then** the cache is invalidated automatically
+**And** full re-indexation occurs
+**And** the "index-cache-miss" event is emitted
+
+**Given** file hash calculation is needed
+**When** I implement calculate_file_hash()
+**Then** it uses SHA256 on first 1MB + last 1MB + file size
+**And** calculation completes in <1 second for any file size
+
+**Given** IndexCache manager is implemented
+**When** I call get_cached_index(file_path)
+**Then** it checks hash validity and returns TieredIndex if valid
+**And** cache location is {app_data}/index_cache/{file_hash}.rkyv
+
+**Given** hybrid.rs orchestrates indexation
+**When** I integrate cache checking
+**Then** build_index() first checks cache (fast path)
+**And** on cache miss, runs progressive indexation and saves to cache on completion
+
+**Tasks:** 11-13 from tech-spec (Phase 4)
+
+---
+
+### Story 6.5: Progressive Loading UI Feedback
+
+As a network administrator,
+I want clear visual feedback during progressive loading,
+So that I understand indexation progress and know when I can start filtering.
+
+**Acceptance Criteria:**
+
+**Given** progressive indexation is running
+**When** each batch completes
+**Then** the UI updates with:
+- Percentage: "45%"
+- Entries: "32M / 71M entries"
+- Batches: "Batch 6 / 14"
+- Speed and ETA (existing)
+
+**Given** the first batch completes
+**When** partial_filter_available becomes true
+**Then** a badge appears: "Partial filtering available"
+**And** the badge is visually prominent (green indicator)
+
+**Given** a file loads from cache
+**When** the index-cache-hit event fires
+**Then** a toast notification appears: "Index loaded from cache"
+**And** the progress dialog shows "Loaded from cache (instant)"
+
+**Given** FileState in Zustand store exists
+**When** I extend it for progressive loading
+**Then** it includes: indexProgress, partialFilterAvailable, cacheHit
+
+**And** the UI follows existing Tailwind patterns
+**And** dark/light theme support is maintained
+
+**Tasks:** 16-18 from tech-spec (Phase 6)
+
+---
+
+### Story 6.6: Performance Validation & Testing
+
+As a developer,
+I want comprehensive tests and benchmarks for the progressive indexation system,
+So that I can verify performance targets are met and prevent regressions.
+
+**Acceptance Criteria:**
+
+**Given** rkyv serialization is implemented
+**When** I run round-trip unit tests
+**Then** all index types serialize and deserialize correctly
+**And** tests cover InvertedIndex, BitmapIndex, OffsetTable with 100K+ entries
+
+**Given** progressive indexation is implemented
+**When** I run integration tests
+**Then** partial filtering works during indexation
+**And** memory stays bounded (<2GB peak)
+**And** test uses ~100MB log file fixture
+
+**Given** cache system is implemented
+**When** I run cache invalidation tests
+**Then** cache hit, miss, and invalidation scenarios all pass
+**And** hash changes trigger re-indexation
+
+**Given** criterion benchmarks exist
+**When** I benchmark rkyv vs bincode
+**Then** rkyv load time for 70M entries is <100ms
+**And** rkyv is at least 10x faster than bincode for deserialization
+
+**And** all 7 Acceptance Criteria from tech-spec are validated
+**And** performance gates in CI/CD are updated if needed
+
+**Tasks:** 19-22 from tech-spec (Phase 7)
+
+---
+
+### Epic 6 FR Coverage Map
+
+| Tech-Spec Reference | Story | Description |
+|---------------------|-------|-------------|
+| Tasks 1-4 (Phase 1) | 6.2 | rkyv dependencies and derives |
+| Tasks 5-7 (Phase 2) | 6.2 | Streaming migration bincode→rkyv |
+| Tasks 8-10 (Phase 3) | 6.3 | Progressive indexation with partial filtering |
+| Tasks 11-13 (Phase 4) | 6.4 | Persistent cache system |
+| Tasks 14-15 (Phase 5) | 6.2 | Warm tier rkyv migration |
+| Tasks 16-18 (Phase 6) | 6.5 | Frontend progressive UI |
+| Tasks 19-22 (Phase 7) | 6.6 | Testing and validation |
+| NFR-001.4 | 6.3 | Memory bounded <2GB |
+| NFR-001.6 | 6.4 | Index load <500ms from cache |

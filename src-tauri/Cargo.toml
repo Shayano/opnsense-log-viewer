@@ -61,6 +61,12 @@ lasso = { version = "0.7", features = ["multi-threaded"] }  # String interning (
 mimalloc = { version = "0.1", default-features = false, optional = true }  # Per-thread allocator
 sysinfo = "0.32"        # Memory monitoring
 
+# Story 6.2: rkyv zero-copy serialization for fast index reload
+# Note: rkyv re-exports bytecheck for CheckBytes validation
+# Note: HashMap support is included with "std" feature (hashmap_impl doesn't exist in 0.7.x)
+rkyv = { version = "0.7.45", features = ["validation", "std"] }
+bytecheck = { version = "0.6.12" }  # Must match rkyv's bytecheck version
+
 [features]
 default = ["mimalloc-allocator"]
 mimalloc-allocator = ["dep:mimalloc"]

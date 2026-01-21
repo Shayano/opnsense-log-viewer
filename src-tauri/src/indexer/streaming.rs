@@ -28,6 +28,10 @@ use memmap2::Mmap;
 use rayon::prelude::*;
 use roaring::RoaringBitmap;
 
+use rkyv::{Archive, Serialize as RkyvSerialize, Deserialize as RkyvDeserialize};
+use rkyv::Deserialize as _;
+use bytecheck::CheckBytes;
+
 use crate::indexer::bitmap::BitmapIndex;
 use crate::indexer::interner::LocalInterner;
 use crate::indexer::inverted::InvertedIndex;
@@ -49,6 +53,12 @@ const CHUNKS_PER_BATCH: usize = 100;
 
 /// Estimated unique IPs per batch (for interner capacity)
 const ESTIMATED_UNIQUE_IPS: usize = 10000;
+
+/// Magic bytes for batch file format identification (Story 6.2, AC5)
+const BATCH_MAGIC: &[u8; 8] = b"OPNSRKYV";
+
+/// Current batch file format version
+const BATCH_VERSION: u32 = 1;
 
 /// Parsed entry data (minimal allocation)
 /// Story 6.1: Uses Box<str> instead of String to save 8 bytes per string (16 vs 24 bytes)
@@ -250,7 +260,10 @@ impl BatchIndexes {
 }
 
 /// Serializable format for partial batch indexes
-#[derive(serde::Serialize, serde::Deserialize)]
+///
+/// Story 6.2: Uses rkyv for fast zero-copy serialization of batch data
+#[derive(serde::Serialize, serde::Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[archive_attr(derive(CheckBytes))]
 struct SerializedBatchIndexes {
     actions: Vec<(String, Vec<u8>)>,  // Key + serialized RoaringBitmap
     protocols: Vec<(String, Vec<u8>)>,
@@ -502,14 +515,24 @@ fn process_batch(
 }
 
 /// Save batch indexes to a temporary file
+///
+/// Story 6.2: Uses rkyv for faster serialization with magic bytes and version header (AC5)
 fn save_batch_to_disk(batch: BatchIndexes, temp_dir: &Path, batch_num: usize) -> Result<PathBuf, IndexError> {
-    let file_path = temp_dir.join(format!("batch_{:04}.bin", batch_num));
+    let file_path = temp_dir.join(format!("batch_{:04}.rkyv", batch_num));
     let file = File::create(&file_path)?;
     let mut writer = BufWriter::with_capacity(64 * 1024, file);
 
     let serialized: SerializedBatchIndexes = batch.into();
-    let encoded = bincode::serde::encode_to_vec(&serialized, bincode::config::standard())
-        .map_err(|e| IndexError::SerializationError(e.to_string()))?;
+
+    // Write magic bytes and version header (Story 6.2, AC5)
+    writer.write_all(BATCH_MAGIC)?;
+    writer.write_all(&BATCH_VERSION.to_le_bytes())?;
+    // Reserved 4 bytes for future use
+    writer.write_all(&[0u8; 4])?;
+
+    // Use rkyv for fast serialization
+    let encoded = rkyv::to_bytes::<_, 256>(&serialized)
+        .map_err(|e| IndexError::SerializationError(format!("rkyv serialization failed: {:?}", e)))?;
 
     writer.write_all(&encoded)?;
     writer.flush()?;
@@ -518,14 +541,36 @@ fn save_batch_to_disk(batch: BatchIndexes, temp_dir: &Path, batch_num: usize) ->
 }
 
 /// Load batch indexes from a temporary file
+///
+/// Story 6.2: Uses rkyv for faster deserialization with magic byte validation (AC5)
 fn load_batch_from_disk(path: &Path) -> Result<BatchIndexes, IndexError> {
     let file = File::open(path)?;
     let reader = BufReader::with_capacity(64 * 1024, file);
     let bytes: Vec<u8> = std::io::Read::bytes(reader)
         .collect::<Result<Vec<_>, _>>()?;
 
-    let (serialized, _): (SerializedBatchIndexes, _) = bincode::serde::decode_from_slice(&bytes, bincode::config::standard())
-        .map_err(|e| IndexError::SerializationError(e.to_string()))?;
+    // Validate magic bytes and version header (Story 6.2, AC5)
+    const HEADER_SIZE: usize = 16; // 8 magic + 4 version + 4 reserved
+    if bytes.len() < HEADER_SIZE {
+        return Err(IndexError::SerializationError("Batch file too small".to_string()));
+    }
+    if &bytes[0..8] != BATCH_MAGIC {
+        return Err(IndexError::SerializationError("Invalid batch file magic bytes".to_string()));
+    }
+    let version = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+    if version != BATCH_VERSION {
+        return Err(IndexError::SerializationError(format!(
+            "Unsupported batch file version: {} (expected {})", version, BATCH_VERSION
+        )));
+    }
+
+    // Use rkyv for fast deserialization with validation (skip header)
+    let archived = rkyv::check_archived_root::<SerializedBatchIndexes>(&bytes[HEADER_SIZE..])
+        .map_err(|e| IndexError::SerializationError(format!("rkyv validation failed: {:?}", e)))?;
+
+    let serialized: SerializedBatchIndexes = archived
+        .deserialize(&mut rkyv::Infallible)
+        .map_err(|e| IndexError::SerializationError(format!("rkyv deserialization failed: {:?}", e)))?;
 
     BatchIndexes::try_from(serialized)
 }

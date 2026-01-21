@@ -1,14 +1,123 @@
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Serialize as RkyvSerialize, Deserialize as RkyvDeserialize};
+use bytecheck::CheckBytes;
+
+/// Story 6.2 (AC3): Serializable representation for BitmapIndex with RoaringBitmap
+///
+/// Since RoaringBitmap doesn't implement rkyv traits natively, we use an
+/// intermediate serializable format that stores bitmaps as byte arrays.
+/// This struct is used for rkyv serialization while BitmapIndex remains
+/// the primary in-memory representation.
+#[derive(Archive, RkyvSerialize, RkyvDeserialize)]
+#[archive_attr(derive(CheckBytes))]
+pub struct BitmapIndexRkyv {
+    /// Actions: Vec of (key, serialized_bitmap_bytes)
+    actions: Vec<(String, Vec<u8>)>,
+    /// Protocols: Vec of (key, serialized_bitmap_bytes)
+    protocols: Vec<(String, Vec<u8>)>,
+    /// Interfaces: Vec of (key, serialized_bitmap_bytes)
+    interfaces: Vec<(String, Vec<u8>)>,
+}
+
+impl BitmapIndexRkyv {
+    /// Convert from BitmapIndex to serializable format
+    pub fn from_bitmap_index(index: &BitmapIndex) -> Self {
+        Self {
+            actions: index.actions.iter().map(|(k, v)| {
+                let mut bytes = Vec::new();
+                v.serialize_into(&mut bytes).expect("RoaringBitmap serialization");
+                (k.clone(), bytes)
+            }).collect(),
+            protocols: index.protocols.iter().map(|(k, v)| {
+                let mut bytes = Vec::new();
+                v.serialize_into(&mut bytes).expect("RoaringBitmap serialization");
+                (k.clone(), bytes)
+            }).collect(),
+            interfaces: index.interfaces.iter().map(|(k, v)| {
+                let mut bytes = Vec::new();
+                v.serialize_into(&mut bytes).expect("RoaringBitmap serialization");
+                (k.clone(), bytes)
+            }).collect(),
+        }
+    }
+
+    /// Convert to BitmapIndex from serializable format
+    pub fn to_bitmap_index(&self) -> BitmapIndex {
+        let actions = self.actions.iter().map(|(k, v)| {
+            let bitmap = RoaringBitmap::deserialize_from(v.as_slice())
+                .expect("RoaringBitmap deserialization");
+            (k.clone(), bitmap)
+        }).collect();
+
+        let protocols = self.protocols.iter().map(|(k, v)| {
+            let bitmap = RoaringBitmap::deserialize_from(v.as_slice())
+                .expect("RoaringBitmap deserialization");
+            (k.clone(), bitmap)
+        }).collect();
+
+        let interfaces = self.interfaces.iter().map(|(k, v)| {
+            let bitmap = RoaringBitmap::deserialize_from(v.as_slice())
+                .expect("RoaringBitmap deserialization");
+            (k.clone(), bitmap)
+        }).collect();
+
+        BitmapIndex { actions, protocols, interfaces }
+    }
+}
+
+impl ArchivedBitmapIndexRkyv {
+    /// Convert from archived format to BitmapIndex (zero-copy friendly access)
+    pub fn to_bitmap_index(&self) -> BitmapIndex {
+        let actions = self.actions.iter().map(|(k, v)| {
+            let bitmap = RoaringBitmap::deserialize_from(v.as_slice())
+                .expect("RoaringBitmap deserialization");
+            (k.to_string(), bitmap)
+        }).collect();
+
+        let protocols = self.protocols.iter().map(|(k, v)| {
+            let bitmap = RoaringBitmap::deserialize_from(v.as_slice())
+                .expect("RoaringBitmap deserialization");
+            (k.to_string(), bitmap)
+        }).collect();
+
+        let interfaces = self.interfaces.iter().map(|(k, v)| {
+            let bitmap = RoaringBitmap::deserialize_from(v.as_slice())
+                .expect("RoaringBitmap deserialization");
+            (k.to_string(), bitmap)
+        }).collect();
+
+        BitmapIndex { actions, protocols, interfaces }
+    }
+}
 
 /// Bitmap index for low-cardinality fields (action, protocol, interface)
 /// Uses compressed bitmaps for efficient set operations
+///
+/// Story 6.2: Use BitmapIndexRkyv for serialization via `to_rkyv()`/`from_rkyv()`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BitmapIndex {
     actions: HashMap<String, RoaringBitmap>,
     protocols: HashMap<String, RoaringBitmap>,
     interfaces: HashMap<String, RoaringBitmap>,
+}
+
+impl BitmapIndex {
+    /// Convert to rkyv-serializable format
+    pub fn to_rkyv(&self) -> BitmapIndexRkyv {
+        BitmapIndexRkyv::from_bitmap_index(self)
+    }
+
+    /// Create from rkyv-serializable format
+    pub fn from_rkyv(rkyv: &BitmapIndexRkyv) -> Self {
+        rkyv.to_bitmap_index()
+    }
+
+    /// Create from archived rkyv format (for zero-copy access patterns)
+    pub fn from_archived_rkyv(archived: &ArchivedBitmapIndexRkyv) -> Self {
+        archived.to_bitmap_index()
+    }
 }
 
 impl Default for BitmapIndex {
@@ -226,5 +335,66 @@ mod tests {
         let result = index.negate(block_bitmap, 2);
         assert_eq!(result.len(), 1);
         assert!(result.contains(1));
+    }
+
+    /// Story 6.2 (AC3): rkyv round-trip test for BitmapIndex using BitmapIndexRkyv
+    #[test]
+    fn test_bitmap_index_rkyv_roundtrip() {
+        let mut index = BitmapIndex::new();
+
+        // Add many entries to test bitmap compression
+        for i in 0..10_000u64 {
+            let action = if i % 3 == 0 { "block" } else if i % 3 == 1 { "pass" } else { "reject" };
+            let protocol = if i % 2 == 0 { "TCP" } else { "UDP" };
+            let interface = format!("vtnet{}", i % 4);
+            index.add_entry(i, Some(action), Some(protocol), Some(&interface));
+        }
+
+        // Convert to rkyv-serializable format and serialize
+        let rkyv_format = index.to_rkyv();
+        let bytes = rkyv::to_bytes::<_, 256>(&rkyv_format).expect("rkyv serialization failed");
+
+        // Verify serialized data is compact (RoaringBitmap compresses well)
+        assert!(bytes.len() > 100, "Expected some serialized data");
+        assert!(bytes.len() < 500_000, "Serialized data should be reasonably compact");
+
+        // Validate archived data
+        let archived = rkyv::check_archived_root::<BitmapIndexRkyv>(&bytes)
+            .expect("rkyv validation failed");
+
+        // Verify archived vecs have entries
+        assert!(!archived.actions.is_empty(), "Archived actions should have entries");
+        assert!(!archived.protocols.is_empty(), "Archived protocols should have entries");
+        assert!(!archived.interfaces.is_empty(), "Archived interfaces should have entries");
+
+        // Convert from archived format back to BitmapIndex
+        let deserialized = BitmapIndex::from_archived_rkyv(archived);
+
+        // Verify roundtrip preserves bitmap data
+        let original_block = index.query_action("block").unwrap();
+        let deserialized_block = deserialized.query_action("block").unwrap();
+        assert_eq!(original_block.len(), deserialized_block.len(),
+            "Block bitmap length mismatch");
+
+        // Verify specific entries
+        assert!(deserialized_block.contains(0), "Entry 0 should be in block bitmap");
+        assert!(deserialized_block.contains(3), "Entry 3 should be in block bitmap");
+        assert!(!deserialized_block.contains(1), "Entry 1 should NOT be in block bitmap");
+
+        // Verify protocol bitmaps
+        let original_tcp = index.query_protocol("TCP").unwrap();
+        let deserialized_tcp = deserialized.query_protocol("TCP").unwrap();
+        assert_eq!(original_tcp.len(), deserialized_tcp.len(),
+            "TCP bitmap length mismatch");
+
+        // Verify interface bitmaps
+        let original_vtnet0 = index.query_interface("vtnet0").unwrap();
+        let deserialized_vtnet0 = deserialized.query_interface("vtnet0").unwrap();
+        assert_eq!(original_vtnet0.len(), deserialized_vtnet0.len(),
+            "vtnet0 bitmap length mismatch");
+
+        // Verify bitmap operations still work on deserialized data
+        let intersect_result = deserialized.intersect(vec![deserialized_block, deserialized_tcp]);
+        assert!(intersect_result.len() > 0, "Intersection should have entries");
     }
 }
