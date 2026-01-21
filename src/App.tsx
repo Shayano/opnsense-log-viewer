@@ -4,8 +4,6 @@ import { listen } from '@tauri-apps/api/event';
 import { Loader2 } from 'lucide-react';
 import { ThemeToggle } from './components/theme-toggle';
 import { Toaster } from './components/base';
-import { ErrorBoundary } from './components/error-boundary';
-import { ComponentShowcase } from './pages/component-showcase';
 import { FileSelector, FileError } from './components/file-selector';
 import { FilterSidebar } from './components/filter-sidebar';
 import { SettingsDialog } from './components/settings-dialog';
@@ -240,21 +238,6 @@ function App() {
                 )}
               </div>
             )}
-
-            <h2 className="text-xl font-medium mb-6 mt-12">Component Showcase</h2>
-            <p className="text-gray-600 dark:text-gray-400 mb-8">
-              Tailwind CSS design system foundation is now configured. The component showcase below
-              demonstrates all base components with theme support.
-            </p>
-            <ErrorBoundary
-              fallback={
-                <div className="text-center text-error-600 dark:text-error-400">
-                  Component showcase failed to load
-                </div>
-              }
-            >
-              <ComponentShowcase />
-            </ErrorBoundary>
           </div>
         </main>
       </div>

@@ -14,11 +14,12 @@ describe('App', () => {
     expect(screen.getByLabelText(/Toggle dark mode/i)).toBeInTheDocument();
   });
 
-  it('displays the component showcase section', () => {
+  it('[Story 0.6] does not display component showcase in production UI', () => {
     render(<App />);
-    expect(screen.getByRole('heading', { name: /Component Showcase/i })).toBeInTheDocument();
+    // Story 0.6: Component Showcase removed - production UI should not show development tools
+    expect(screen.queryByRole('heading', { name: /Component Showcase/i })).not.toBeInTheDocument();
     expect(
-      screen.getByText(/Tailwind CSS design system foundation is now configured/i)
-    ).toBeInTheDocument();
+      screen.queryByText(/Tailwind CSS design system foundation is now configured/i)
+    ).not.toBeInTheDocument();
   });
 });
