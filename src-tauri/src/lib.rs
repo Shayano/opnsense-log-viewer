@@ -44,6 +44,10 @@ pub fn run() {
                 loop {
                     interval_timer.tick().await;
 
+                    // Clean up caches to prevent memory leaks (every 30 seconds)
+                    // Max age: 1 hour, Max rule labels: 10000, Max aliases: 5000
+                    cache_clone.cleanup_cache(3600, 10000, 5000);
+
                     // Only attempt reconnect if currently disconnected
                     if !cache_clone.is_connected() {
                         debug!("Background health check: attempting reconnect");

@@ -216,6 +216,14 @@ pub async fn fetch_rule_labels_batch(
 pub async fn fetch_all_rule_labels(
     credentials: &ApiCredentials,
 ) -> Result<HashMap<String, String>> {
+    fetch_rule_labels_with_limit(credentials, None).await
+}
+
+/// Fetch rule labels with optional page limit to prevent memory exhaustion
+pub async fn fetch_rule_labels_with_limit(
+    credentials: &ApiCredentials,
+    max_pages: Option<usize>,
+) -> Result<HashMap<String, String>> {
     let client = build_api_client(credentials)?;
     let base = credentials.endpoint_url.trim_end_matches('/');
     let url = format!("{}/api/firewall/filter/searchRule", base);
@@ -234,14 +242,21 @@ pub async fn fetch_all_rule_labels(
             "show_all": 1
         });
 
-        let response = client
+        // Add timeout for individual rule label requests (5 seconds per page)
+        let request_future = client
             .post(&url)
             .basic_auth(&credentials.api_key, Some(&credentials.api_secret))
             .header("Content-Type", "application/json")
             .body(serde_json::to_string(&body).context("serialize searchRule body")?)
-            .send()
-            .await
-            .context("Failed to fetch rules in fetch_all_rule_labels")?;
+            .send();
+
+        let response = match tokio::time::timeout(std::time::Duration::from_secs(5), request_future).await {
+            Ok(result) => result.context("Failed to fetch rules in fetch_all_rule_labels")?,
+            Err(_) => {
+                warn!("Rule label fetch timed out after 5 seconds for page {}", current);
+                return Err(ApiError::TimeoutError(5).into());
+            }
+        };
 
         if !response.status().is_success() {
             if response.status() == 401 {
@@ -296,7 +311,15 @@ pub async fn fetch_all_rule_labels(
             }
         }
 
-        if (current - 1) * ROW_COUNT + rows.len() as i64 >= total || rows.is_empty() {
+        // Check page limit to prevent memory exhaustion
+        if let Some(max) = max_pages {
+            if current >= max {
+                warn!("Stopped fetching rule labels at page {} (limit: {}) to prevent memory exhaustion", current, max);
+                break;
+            }
+        }
+
+        if (current as i64 - 1) * ROW_COUNT + rows.len() as i64 >= total || rows.is_empty() {
             break;
         }
         current += 1;
@@ -459,6 +482,14 @@ pub async fn fetch_aliases_batch(
 pub async fn fetch_all_aliases(
     credentials: &ApiCredentials,
 ) -> Result<HashMap<String, Vec<AliasMapping>>> {
+    fetch_aliases_with_limit(credentials, None).await
+}
+
+/// Fetch aliases with optional limit to prevent memory exhaustion
+pub async fn fetch_aliases_with_limit(
+    credentials: &ApiCredentials,
+    max_aliases: Option<usize>,
+) -> Result<HashMap<String, Vec<AliasMapping>>> {
     let client = build_api_client(credentials)?;
     let base = credentials.endpoint_url.trim_end_matches('/');
 
@@ -507,23 +538,42 @@ pub async fn fetch_all_aliases(
     // 2) For each alias, get content and build IP → Vec<AliasMapping>
     let mut ip_to_aliases: HashMap<String, Vec<AliasMapping>> = HashMap::new();
 
-    for name in names {
+    // Limit aliases to prevent memory exhaustion
+    let names_to_process = if let Some(max) = max_aliases {
+        if names.len() > max {
+            warn!("Limiting alias fetch to {} aliases (found {}) to prevent memory exhaustion", max, names.len());
+            &names[..max]
+        } else {
+            &names
+        }
+    } else {
+        &names
+    };
+
+    for name in names_to_process {
         let path_name = name.replace(' ', "%20");
         let detail_url = format!("{}/api/firewall/alias_util/list/{}", base, path_name);
 
-        let detail_resp = match client
+        // Add timeout for individual alias requests (3 seconds per alias)
+        let request_future = client
             .get(&detail_url)
             .basic_auth(&credentials.api_key, Some(&credentials.api_secret))
-            .send()
-            .await
-        {
-            Ok(r) if r.status().is_success() => r,
-            Ok(r) => {
-                debug!("alias_util/list/{} returned {}", name, r.status());
-                continue;
-            }
-            Err(e) => {
-                warn!("alias_util/list/{} failed: {}", name, e);
+            .send();
+
+        let detail_resp = match tokio::time::timeout(std::time::Duration::from_secs(3), request_future).await {
+            Ok(result) => match result {
+                Ok(r) if r.status().is_success() => r,
+                Ok(r) => {
+                    debug!("alias_util/list/{} returned {}", name, r.status());
+                    continue;
+                }
+                Err(e) => {
+                    warn!("alias_util/list/{} failed: {}", name, e);
+                    continue;
+                }
+            },
+            Err(_) => {
+                warn!("Alias fetch timed out after 3 seconds for alias: {}", name);
                 continue;
             }
         };

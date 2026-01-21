@@ -321,9 +321,150 @@ impl EnrichmentCacheState {
     }
 }
 
-impl Default for EnrichmentCacheState {
-    fn default() -> Self {
-        Self::new()
+
+impl EnrichmentCacheState {
+    /// Clean up cache to prevent memory exhaustion
+    /// Removes entries older than max_age_seconds and limits cache sizes
+    pub fn cleanup_cache(&self, max_age_seconds: i64, max_rule_labels: usize, max_aliases: usize) {
+        use chrono::Duration;
+
+        let now = Utc::now();
+        let max_age = Duration::seconds(max_age_seconds);
+
+        // Clean up rule labels by age
+        {
+            let should_clear_age = if let Ok(metadata) = self.rule_label_metadata.lock() {
+                if let Some(timestamp) = *metadata {
+                    now.signed_duration_since(timestamp) > max_age
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if should_clear_age {
+                debug!("Clearing rule label cache (age: exceeded {}s)", max_age_seconds);
+                if let Ok(mut cache) = self.rule_label_cache.lock() {
+                    *cache = HashMap::new();
+                }
+                if let Ok(mut meta) = self.rule_label_metadata.lock() {
+                    *meta = None;
+                }
+            }
+        }
+
+        // Limit rule label cache size
+        {
+            let should_clear_size = if let Ok(cache) = self.rule_label_cache.lock() {
+                cache.len() > max_rule_labels
+            } else {
+                false
+            };
+
+            if should_clear_size {
+                debug!("Rule label cache size exceeds limit {}, clearing", max_rule_labels);
+                if let Ok(mut cache) = self.rule_label_cache.lock() {
+                    *cache = HashMap::new();
+                }
+                if let Ok(mut meta) = self.rule_label_metadata.lock() {
+                    *meta = None;
+                }
+            }
+        }
+
+        // Clean up aliases by age
+        {
+            let should_clear_age = if let Ok(metadata) = self.alias_metadata.lock() {
+                if let Some(timestamp) = *metadata {
+                    now.signed_duration_since(timestamp) > max_age
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if should_clear_age {
+                debug!("Clearing alias cache (age: exceeded {}s)", max_age_seconds);
+                if let Ok(mut cache) = self.alias_cache.lock() {
+                    *cache = HashMap::new();
+                }
+                if let Ok(mut meta) = self.alias_metadata.lock() {
+                    *meta = None;
+                }
+            }
+        }
+
+        // Limit alias cache size
+        {
+            let should_clear_size = if let Ok(cache) = self.alias_cache.lock() {
+                cache.len() > max_aliases
+            } else {
+                false
+            };
+
+            if should_clear_size {
+                debug!("Alias cache size exceeds limit {}, clearing", max_aliases);
+                if let Ok(mut cache) = self.alias_cache.lock() {
+                    *cache = HashMap::new();
+                }
+                if let Ok(mut meta) = self.alias_metadata.lock() {
+                    *meta = None;
+                }
+            }
+        }
+
+        // Clean up interface cache by age (if metadata exists)
+        {
+            let should_clear = if let Ok(cache_opt) = self.interface_cache.lock() {
+                if let Some(cache) = cache_opt.as_ref() {
+                    now.signed_duration_since(cache.last_updated) > max_age
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if should_clear {
+                debug!("Clearing interface cache (age: exceeded {}s)", max_age_seconds);
+                if let Ok(mut cache_mut) = self.interface_cache.lock() {
+                    *cache_mut = None;
+                }
+            }
+        }
+    }
+
+    /// Force cleanup of all caches (for memory leak prevention)
+    pub fn force_cleanup(&self) {
+        debug!("Forcing cleanup of all enrichment caches");
+
+        // Clear rule labels
+        if let Ok(mut cache) = self.rule_label_cache.lock() {
+            *cache = HashMap::new();
+        }
+        if let Ok(mut meta) = self.rule_label_metadata.lock() {
+            *meta = None;
+        }
+
+        // Clear aliases
+        if let Ok(mut cache) = self.alias_cache.lock() {
+            *cache = HashMap::new();
+        }
+        if let Ok(mut meta) = self.alias_metadata.lock() {
+            *meta = None;
+        }
+
+        // Clear interfaces
+        if let Ok(mut cache) = self.interface_cache.lock() {
+            *cache = None;
+        }
+
+        // Clear device ID
+        if let Ok(mut device) = self.device_id.lock() {
+            *device = None;
+        }
     }
 }
 

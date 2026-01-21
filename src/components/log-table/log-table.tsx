@@ -179,27 +179,41 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
 
   // Auto-enrich rule labels when entries change (Story 3.3)
   useEffect(() => {
+    console.log('[MEM] LogTable: useEffect triggered for rule labels', {
+      entriesLength: entries.length,
+      hasEntries: entries.length > 0
+    });
+
     if (entries.length > 0) {
       const DEBOUNCE_ENRICHMENT_MS = 500;
       const timeoutId = setTimeout(() => {
-        console.log('[MEM] LogTable: enrichRuleLabels', { entriesCount: entries.length });
+        console.log('[MEM] LogTable: enrichRuleLabels about to call', { entriesCount: entries.length });
         enrichRuleLabels(entries);
       }, DEBOUNCE_ENRICHMENT_MS);
 
       return () => clearTimeout(timeoutId);
+    } else {
+      console.log('[MEM] LogTable: no entries to enrich for rule labels');
     }
   }, [entries]);
 
   // Auto-enrich IP aliases when entries change (Story 3.4)
   useEffect(() => {
+    console.log('[MEM] LogTable: useEffect triggered for aliases', {
+      entriesLength: entries.length,
+      hasEntries: entries.length > 0
+    });
+
     if (entries.length > 0) {
       const DEBOUNCE_ENRICHMENT_MS = 500;
       const timeoutId = setTimeout(() => {
-        console.log('[MEM] LogTable: enrichAliases', { entriesCount: entries.length });
+        console.log('[MEM] LogTable: enrichAliases about to call', { entriesCount: entries.length });
         enrichAliases(entries);
       }, DEBOUNCE_ENRICHMENT_MS);
 
       return () => clearTimeout(timeoutId);
+    } else {
+      console.log('[MEM] LogTable: no entries to enrich for aliases');
     }
   }, [entries]);
 

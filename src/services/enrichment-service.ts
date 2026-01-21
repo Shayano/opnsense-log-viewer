@@ -15,8 +15,14 @@ import toast from 'react-hot-toast';
  * @param entries - Log entries to enrich
  */
 export async function enrichRuleLabels(entries: LogEntry[]): Promise<void> {
+  console.log('enrichRuleLabels called', { entriesCount: entries.length });
+
   // Extract unique hashes
   const hashes = extractUniqueRuleHashes(entries);
+  console.log('extractUniqueRuleHashes result', {
+    hashesSize: hashes.size,
+    hashesArray: Array.from(hashes)
+  });
 
   if (hashes.size === 0) {
     console.log('No rule hashes found in entries');
@@ -24,16 +30,18 @@ export async function enrichRuleLabels(entries: LogEntry[]): Promise<void> {
   }
 
   const hashArray = Array.from(hashes);
-  console.log(`Enriching ${hashArray.length} unique rule labels`);
+  console.log(`Enriching ${hashArray.length} unique rule labels`, { hashArray });
 
   try {
     // Show progress toast
     const toastId = toast.loading(`Enriching rules... 0 of ${hashArray.length}`);
 
+    console.log('About to invoke fetch_rule_labels', { hashArray });
     // Fetch labels from backend
     const labels = await invoke<Record<string, string>>('fetch_rule_labels', {
       hashes: hashArray,
     });
+    console.log('fetch_rule_labels invoke result', { labelsKeys: Object.keys(labels), labelsCount: Object.keys(labels).length });
 
     // Update store
     const keyCount = Object.keys(labels).length;
@@ -98,8 +106,14 @@ export async function loadCachedRuleLabels(): Promise<void> {
  * @param entries - Log entries to enrich
  */
 export async function enrichAliases(entries: LogEntry[]): Promise<void> {
+  console.log('enrichAliases called', { entriesCount: entries.length });
+
   // Extract unique IPs (source + destination)
   const ips = extractUniqueIPs(entries);
+  console.log('extractUniqueIPs result', {
+    ipsSize: ips.size,
+    ipsArray: Array.from(ips)
+  });
 
   if (ips.size === 0) {
     console.log('No IPs found in entries');
@@ -107,16 +121,18 @@ export async function enrichAliases(entries: LogEntry[]): Promise<void> {
   }
 
   const ipArray = Array.from(ips);
-  console.log(`Enriching ${ipArray.length} unique IP aliases`);
+  console.log(`Enriching ${ipArray.length} unique IP aliases`, { ipArray });
 
   try {
     // Show progress toast
     const toastId = toast.loading(`Enriching aliases... ${ipArray.length} IPs`);
 
+    console.log('About to invoke fetch_aliases', { ipArray });
     // Fetch aliases from backend
     const aliases = await invoke<Record<string, AliasMapping[]>>('fetch_aliases', {
       ips: ipArray,
     });
+    console.log('fetch_aliases invoke result', { aliasesKeys: Object.keys(aliases), aliasesCount: Object.keys(aliases).length });
 
     // Update store
     const keyCount = Object.keys(aliases).length;

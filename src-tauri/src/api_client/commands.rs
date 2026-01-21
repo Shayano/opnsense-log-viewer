@@ -7,6 +7,7 @@ use crate::state::EnrichmentCacheState;
 use log::{info, warn};
 use std::collections::HashMap;
 use chrono::Utc;
+use tokio::time::{timeout, Duration};
 
 /// Save API credentials to OS keychain (with encrypted fallback)
 #[command]
@@ -138,41 +139,26 @@ pub async fn test_api_connection(
             }
         })?;
 
-    // Auto-fetch interfaces, rule labels, and aliases on successful connection (no log file required)
+    // Auto-fetch interfaces only on successful connection (no log file required)
+    // NOTE: Rule labels and aliases are fetched on-demand only to prevent memory leaks
     if result.success {
         let credentials_clone = credentials.clone();
         let cache_state_clone = (*cache_state).clone();
         let app_handle_clone = app_handle.clone();
 
+        // Spawn lightweight task for interface mapping only with timeout
         tokio::spawn(async move {
-            // 1) Interfaces
-            if let Ok(mappings) = fetch_interface_mappings(&credentials_clone).await {
-                cache_state_clone.set_interface_mappings(
-                    mappings.clone(),
-                    credentials_clone.endpoint_url.clone(),
-                );
-                let _ = app_handle_clone.emit("interface-mappings-updated", mappings);
-                info!("Interface mappings auto-fetched on connection success");
-            } else {
-                warn!("Failed to auto-fetch interface mappings");
-            }
-
-            // 2) All rule labels (full ruleset)
-            match fetch_all_rule_labels(&credentials_clone).await {
-                Ok(labels) => {
-                    cache_state_clone.set_rule_labels(labels.clone(), credentials_clone.endpoint_url.clone());
-                    info!("Rule labels auto-fetched on connection: {} entries", labels.len());
+            match timeout(Duration::from_secs(30), fetch_interface_mappings(&credentials_clone)).await {
+                Ok(Ok(mappings)) => {
+                    cache_state_clone.set_interface_mappings(
+                        mappings.clone(),
+                        credentials_clone.endpoint_url.clone(),
+                    );
+                    let _ = app_handle_clone.emit("interface-mappings-updated", mappings);
+                    info!("Interface mappings auto-fetched on connection success");
                 }
-                Err(e) => warn!("Failed to auto-fetch rule labels: {}", e),
-            }
-
-            // 3) All aliases (full alias definitions)
-            match fetch_all_aliases(&credentials_clone).await {
-                Ok(alias_map) => {
-                    cache_state_clone.set_aliases(alias_map.clone(), credentials_clone.endpoint_url.clone());
-                    info!("Aliases auto-fetched on connection: {} IPs", alias_map.len());
-                }
-                Err(e) => warn!("Failed to auto-fetch aliases: {}", e),
+                Ok(Err(e)) => warn!("Failed to auto-fetch interface mappings: {}", e),
+                Err(_) => warn!("Interface mapping fetch timed out after 30 seconds"),
             }
         });
     }
@@ -235,6 +221,7 @@ pub async fn fetch_rule_labels(
     cache_state: State<'_, EnrichmentCacheState>,
     hashes: Vec<String>,
 ) -> Result<HashMap<String, String>, String> {
+    info!("fetch_rule_labels called with {} hashes", hashes.len());
     // Load credentials
     let credentials = manager::load_credentials()
         .ok()
@@ -242,16 +229,57 @@ pub async fn fetch_rule_labels(
         .or_else(|| encrypted_storage::decrypt_and_load().ok().flatten())
         .ok_or("No API credentials saved. Please configure OPNsense API connection first.")?;
 
-    // Fetch from API (batch with parallelization)
+    info!("Rule labels: loaded credentials for {}", credentials.endpoint_url);
+
+    // Debug: check current cache state
+    let current_rule_labels = cache_state.get_all_rule_labels();
+    info!("Current rule labels cache: exists={}, size={}",
+          current_rule_labels.is_some(),
+          current_rule_labels.as_ref().map(|c| c.mappings.len()).unwrap_or(0));
+
+    // Check if we have any rule labels cached
+    let existing_labels = cache_state.get_all_rule_labels();
+    let has_cached_data = existing_labels.as_ref().map(|c| !c.mappings.is_empty()).unwrap_or(false);
+
+    info!("Rule labels enrichment: has_cached_data={}, existing_cache_size={}",
+          has_cached_data,
+          existing_labels.as_ref().map(|c| c.mappings.len()).unwrap_or(0));
+
+    // If no cached data, fetch ALL rules to populate cache (exhaustive enrichment needed)
+    if !has_cached_data {
+        info!("No rule labels cached, fetching ALL rules for exhaustive enrichment");
+        match fetch_all_rule_labels(&credentials).await {
+            Ok(all_labels) => {
+                let labels_count = all_labels.len();
+                cache_state.set_rule_labels(all_labels, credentials.endpoint_url.clone());
+                info!("ALL rule labels cached: {} entries for exhaustive enrichment", labels_count);
+            }
+            Err(e) => {
+                warn!("Failed to fetch all rule labels: {}", e);
+                // Continue with specific hash lookup even if initial fetch fails
+            }
+        }
+    } else {
+        info!("Rule labels already cached, skipping exhaustive fetch");
+    }
+
+    // Now fetch specific hashes (they might be in cache now, or we fetch them individually)
     let labels = fetch_rule_labels_batch(&credentials, hashes)
         .await
         .map_err(|e| format!("Failed to fetch rule labels: {}", e))?;
 
-    // Store in cache
-    cache_state.set_rule_labels(labels.clone(), credentials.endpoint_url.clone());
+    // Store in cache (clone to avoid moving)
+    let result_labels = labels.clone();
+    if let Some(existing) = existing_labels {
+        let mut merged_labels = existing.mappings;
+        merged_labels.extend(labels);
+        cache_state.set_rule_labels(merged_labels, credentials.endpoint_url.clone());
+    } else {
+        cache_state.set_rule_labels(labels, credentials.endpoint_url.clone());
+    }
 
-    info!("Rule labels fetched and cached: {} entries", labels.len());
-    Ok(labels)
+    info!("Rule labels fetched and cached: {} entries", result_labels.len());
+    Ok(result_labels)
 }
 
 /// Get cached rule labels
@@ -283,6 +311,7 @@ pub async fn fetch_aliases(
     cache_state: State<'_, EnrichmentCacheState>,
     ips: Vec<String>,
 ) -> Result<HashMap<String, Vec<AliasMapping>>, String> {
+    info!("fetch_aliases called with {} IPs", ips.len());
     // Load credentials
     let credentials = manager::load_credentials()
         .ok()
@@ -290,16 +319,57 @@ pub async fn fetch_aliases(
         .or_else(|| encrypted_storage::decrypt_and_load().ok().flatten())
         .ok_or("No API credentials saved. Please configure OPNsense API connection first.")?;
 
-    // Fetch from API (batch with parallelization)
+    info!("Aliases: loaded credentials for {}", credentials.endpoint_url);
+
+    // Debug: check current cache state
+    let current_aliases = cache_state.get_all_aliases();
+    info!("Current aliases cache: exists={}, size={}",
+          current_aliases.is_some(),
+          current_aliases.as_ref().map(|c| c.mappings.len()).unwrap_or(0));
+
+    // Check if we have any aliases cached
+    let existing_aliases = cache_state.get_all_aliases();
+    let has_cached_data = existing_aliases.as_ref().map(|c| !c.mappings.is_empty()).unwrap_or(false);
+
+    info!("Aliases enrichment: has_cached_data={}, existing_cache_size={}",
+          has_cached_data,
+          existing_aliases.as_ref().map(|c| c.mappings.len()).unwrap_or(0));
+
+    // If no cached data, fetch ALL aliases to populate cache (exhaustive enrichment needed)
+    if !has_cached_data {
+        info!("No aliases cached, fetching ALL aliases for exhaustive enrichment");
+        match fetch_all_aliases(&credentials).await {
+            Ok(all_aliases) => {
+                let aliases_count = all_aliases.len();
+                cache_state.set_aliases(all_aliases, credentials.endpoint_url.clone());
+                info!("ALL aliases cached: {} IPs covered for exhaustive enrichment", aliases_count);
+            }
+            Err(e) => {
+                warn!("Failed to fetch all aliases: {}", e);
+                // Continue with specific IP lookup even if initial fetch fails
+            }
+        }
+    } else {
+        info!("Aliases already cached, skipping exhaustive fetch");
+    }
+
+    // Now fetch specific IPs (they might be covered by cached aliases now)
     let alias_map = fetch_aliases_batch(&credentials, ips)
         .await
         .map_err(|e| format!("Failed to fetch aliases: {}", e))?;
 
-    // Store in cache
-    cache_state.set_aliases(alias_map.clone(), credentials.endpoint_url.clone());
+    // Store in cache (clone to avoid moving)
+    let result_aliases = alias_map.clone();
+    if let Some(existing) = existing_aliases {
+        let mut merged_aliases = existing.mappings;
+        merged_aliases.extend(alias_map);
+        cache_state.set_aliases(merged_aliases, credentials.endpoint_url.clone());
+    } else {
+        cache_state.set_aliases(alias_map, credentials.endpoint_url.clone());
+    }
 
-    info!("Aliases fetched and cached: {} IPs", alias_map.len());
-    Ok(alias_map)
+    info!("Aliases fetched and cached: {} IPs", result_aliases.len());
+    Ok(result_aliases)
 }
 
 /// Get cached aliases
