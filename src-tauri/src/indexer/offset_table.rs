@@ -20,13 +20,28 @@ impl OffsetTable {
         }
     }
 
-    /// Add an offset for an entry
+    /// Create with pre-allocated capacity (for parallel merge)
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            offsets: vec![0; capacity],
+        }
+    }
+
+    /// Add an offset for an entry (grows vector if needed)
     pub fn add_offset(&mut self, entry_id: u64, offset: u64) {
         // Ensure vector is large enough
         if entry_id as usize >= self.offsets.len() {
             self.offsets.resize(entry_id as usize + 1, 0);
         }
         self.offsets[entry_id as usize] = offset;
+    }
+
+    /// Set offset directly (assumes capacity is already allocated)
+    #[inline]
+    pub fn set_offset(&mut self, entry_id: u64, offset: u64) {
+        if (entry_id as usize) < self.offsets.len() {
+            self.offsets[entry_id as usize] = offset;
+        }
     }
 
     /// Get the offset for an entry

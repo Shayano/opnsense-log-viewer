@@ -27,6 +27,21 @@ impl InvertedIndex {
         }
     }
 
+    /// Create from raw HashMaps (for parallel merge)
+    pub fn from_raw(
+        source_ips: HashMap<String, Vec<u64>>,
+        dest_ips: HashMap<String, Vec<u64>>,
+        source_ports: HashMap<u16, Vec<u64>>,
+        dest_ports: HashMap<u16, Vec<u64>>,
+    ) -> Self {
+        Self {
+            source_ips,
+            dest_ips,
+            source_ports,
+            dest_ports,
+        }
+    }
+
     /// Add an entry to the inverted index
     pub fn add_entry(
         &mut self,

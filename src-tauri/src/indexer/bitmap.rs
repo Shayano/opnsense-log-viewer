@@ -26,6 +26,19 @@ impl BitmapIndex {
         }
     }
 
+    /// Create from raw HashMaps (for parallel merge)
+    pub fn from_raw(
+        actions: HashMap<String, RoaringBitmap>,
+        protocols: HashMap<String, RoaringBitmap>,
+        interfaces: HashMap<String, RoaringBitmap>,
+    ) -> Self {
+        Self {
+            actions,
+            protocols,
+            interfaces,
+        }
+    }
+
     /// Add an entry to the bitmap index
     pub fn add_entry(
         &mut self,
