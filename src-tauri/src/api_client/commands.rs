@@ -139,15 +139,15 @@ pub async fn test_api_connection(
             }
         })?;
 
-    // Auto-fetch interfaces only on successful connection (no log file required)
-    // NOTE: Rule labels and aliases are fetched on-demand only to prevent memory leaks
+    // Auto-fetch all enrichment data on successful connection
     if result.success {
         let credentials_clone = credentials.clone();
         let cache_state_clone = (*cache_state).clone();
         let app_handle_clone = app_handle.clone();
 
-        // Spawn lightweight task for interface mapping only with timeout
+        // Spawn task to fetch all enrichment data (interfaces, rules, aliases) with timeout
         tokio::spawn(async move {
+            // 1. Fetch interface mappings
             match timeout(Duration::from_secs(30), fetch_interface_mappings(&credentials_clone)).await {
                 Ok(Ok(mappings)) => {
                     cache_state_clone.set_interface_mappings(
@@ -159,6 +159,30 @@ pub async fn test_api_connection(
                 }
                 Ok(Err(e)) => warn!("Failed to auto-fetch interface mappings: {}", e),
                 Err(_) => warn!("Interface mapping fetch timed out after 30 seconds"),
+            }
+
+            // 2. Fetch rule labels
+            match timeout(Duration::from_secs(30), fetch_all_rule_labels(&credentials_clone)).await {
+                Ok(Ok(labels)) => {
+                    let count = labels.len();
+                    cache_state_clone.set_rule_labels(labels.clone(), credentials_clone.endpoint_url.clone());
+                    let _ = app_handle_clone.emit("rule-labels-updated", count);
+                    info!("Rule labels auto-fetched on connection success: {} labels", count);
+                }
+                Ok(Err(e)) => warn!("Failed to auto-fetch rule labels: {}", e),
+                Err(_) => warn!("Rule label fetch timed out after 30 seconds"),
+            }
+
+            // 3. Fetch aliases
+            match timeout(Duration::from_secs(30), fetch_all_aliases(&credentials_clone)).await {
+                Ok(Ok(aliases)) => {
+                    let count = aliases.len();
+                    cache_state_clone.set_aliases(aliases.clone(), credentials_clone.endpoint_url.clone());
+                    let _ = app_handle_clone.emit("aliases-updated", count);
+                    info!("Aliases auto-fetched on connection success: {} unique IPs", count);
+                }
+                Ok(Err(e)) => warn!("Failed to auto-fetch aliases: {}", e),
+                Err(_) => warn!("Alias fetch timed out after 30 seconds"),
             }
         });
     }

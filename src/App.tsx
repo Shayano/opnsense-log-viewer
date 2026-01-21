@@ -122,14 +122,34 @@ function App() {
     };
   }, [setInterfaceMappings]);
 
-  // Story 3.3: Auto-load rule labels on app startup
+  // Story 3.3: Auto-load rule labels on app startup and listen for updates
   useEffect(() => {
     loadCachedRuleLabels();
+
+    // Listen for rule labels updates (emitted on successful API fetch)
+    const unlistenPromise = listen<number>('rule-labels-updated', (event) => {
+      console.log('Rule labels updated:', event.payload, 'labels');
+      loadCachedRuleLabels();
+    });
+
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
   }, []);
 
-  // Story 3.4: Auto-load IP aliases on app startup
+  // Story 3.4: Auto-load IP aliases on app startup and listen for updates
   useEffect(() => {
     loadCachedAliases();
+
+    // Listen for aliases updates (emitted on successful API fetch)
+    const unlistenPromise = listen<number>('aliases-updated', (event) => {
+      console.log('Aliases updated:', event.payload, 'unique IPs');
+      loadCachedAliases();
+    });
+
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
   }, []);
 
   // Story 5.3: Detect incomplete exports on startup

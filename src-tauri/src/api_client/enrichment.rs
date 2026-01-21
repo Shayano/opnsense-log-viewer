@@ -209,124 +209,139 @@ pub async fn fetch_rule_labels_batch(
 
 /// Fetch all rule labels from OPNsense API at connection time (no log file required).
 ///
-/// Uses POST /api/firewall/filter/searchRule with JSON body. Must include show_all=1 to get
-/// Firewall -> Rules (main ruleset); without it only Automation -> Filter rules are returned (often 0).
-/// Builds id->description from rows. UUID can be in row.uuid or row["@attributes"].uuid.
-/// Paginates if total exceeds rowCount.
+/// Uses GET /api/diagnostics/firewall/list_rule_ids to get active firewall rules from pf.
+/// This returns all rules currently loaded in the packet filter, not just Automation rules.
+/// Response format: {"items": [{"id": "...", "descr": "..."}, ...]}
+/// Builds id->description mapping for log enrichment.
 pub async fn fetch_all_rule_labels(
     credentials: &ApiCredentials,
 ) -> Result<HashMap<String, String>> {
     fetch_rule_labels_with_limit(credentials, None).await
 }
 
-/// Fetch rule labels with optional page limit to prevent memory exhaustion
+/// Fetch rule labels with optional limit to prevent memory exhaustion
 pub async fn fetch_rule_labels_with_limit(
     credentials: &ApiCredentials,
-    max_pages: Option<usize>,
+    max_rules: Option<usize>,
 ) -> Result<HashMap<String, String>> {
     let client = build_api_client(credentials)?;
     let base = credentials.endpoint_url.trim_end_matches('/');
-    let url = format!("{}/api/firewall/filter/searchRule", base);
 
-    const ROW_COUNT: i64 = 10_000;
-    let mut all_labels = HashMap::new();
-    let mut current = 1;
+    // Use /api/diagnostics/firewall/list_rule_ids to get active pf rules
+    let url = format!("{}/api/diagnostics/firewall/list_rule_ids", base);
 
-    loop {
-        // POST with JSON body. show_all=1 is required to include Firewall -> Rules (not only Automation).
-        let body = serde_json::json!({
-            "current": current,
-            "rowCount": ROW_COUNT,
-            "sort": {},
-            "searchPhrase": "",
-            "show_all": 1
-        });
+    debug!("Fetching all rule labels from OPNsense API via /api/diagnostics/firewall/list_rule_ids");
 
-        // Add timeout for individual rule label requests (5 seconds per page)
-        let request_future = client
-            .post(&url)
-            .basic_auth(&credentials.api_key, Some(&credentials.api_secret))
-            .header("Content-Type", "application/json")
-            .body(serde_json::to_string(&body).context("serialize searchRule body")?)
-            .send();
+    // Add timeout for the request (10 seconds)
+    let request_future = client
+        .get(&url)
+        .basic_auth(&credentials.api_key, Some(&credentials.api_secret))
+        .send();
 
-        let response = match tokio::time::timeout(std::time::Duration::from_secs(5), request_future).await {
-            Ok(result) => result.context("Failed to fetch rules in fetch_all_rule_labels")?,
-            Err(_) => {
-                warn!("Rule label fetch timed out after 5 seconds for page {}", current);
-                return Err(ApiError::TimeoutError(5).into());
-            }
-        };
-
-        if !response.status().is_success() {
-            if response.status() == 401 {
-                return Err(ApiError::AuthError.into());
-            }
-            return Err(ApiError::NetworkError(format!("HTTP {}", response.status())).into());
+    let response = match tokio::time::timeout(std::time::Duration::from_secs(10), request_future).await {
+        Ok(result) => result.context("Failed to fetch rule IDs from diagnostics API")?,
+        Err(_) => {
+            warn!("Rule label fetch timed out after 10 seconds");
+            return Err(ApiError::TimeoutError(10).into());
         }
+    };
 
-        let json: serde_json::Value = response.json().await
-            .context("Failed to parse searchRule response")?;
-
-        let rows: &[serde_json::Value] = json
-            .get("rows")
-            .and_then(|r| r.as_array())
-            .map(|v| v.as_slice())
-            .unwrap_or(&[]);
-        let total: i64 = json.get("total").and_then(|t| t.as_i64()).unwrap_or(0);
-
-        for (i, row) in rows.iter().enumerate() {
-            // OPNsense Filter: descr or description
-            let descr = row.get("descr")
-                .or_else(|| row.get("description"))
-                .and_then(|d| d.as_str())
-                .unwrap_or("")
-                .to_string();
-
-            // Keys: number, id, uuid, sequence; also @attributes.uuid (OPNsense grid)
-            let mut keys: Vec<String> = ["number", "id", "uuid", "sequence"]
-                .iter()
-                .filter_map(|k| {
-                    row.get(*k).and_then(|v| {
-                        v.as_str()
-                            .map(String::from)
-                            .or_else(|| v.as_i64().map(|n| n.to_string()))
-                    })
-                })
-                .filter(|s: &String| !s.is_empty())
-                .collect();
-            if let Some(attr) = row.get("@attributes").and_then(|a| a.get("uuid")).and_then(|u| u.as_str()) {
-                if !attr.is_empty() {
-                    keys.push(attr.to_string());
-                }
-            }
-
-            if keys.is_empty() && i == 0 && total > 0 {
-                let first_keys: Vec<&str> = row.as_object().map(|o| o.keys().map(String::as_str).collect()).unwrap_or_default();
-                warn!("searchRule returned {} rows but no known id in first row. Keys: {:?}", rows.len(), first_keys);
-            }
-
-            for k in keys {
-                all_labels.insert(k, descr.clone());
-            }
+    if !response.status().is_success() {
+        if response.status() == 401 {
+            return Err(ApiError::AuthError.into());
         }
-
-        // Check page limit to prevent memory exhaustion
-        if let Some(max) = max_pages {
-            if current >= max {
-                warn!("Stopped fetching rule labels at page {} (limit: {}) to prevent memory exhaustion", current, max);
-                break;
-            }
-        }
-
-        if (current as i64 - 1) * ROW_COUNT + rows.len() as i64 >= total || rows.is_empty() {
-            break;
-        }
-        current += 1;
+        return Err(ApiError::NetworkError(format!("HTTP {}", response.status())).into());
     }
 
-    info!("Fetched {} rule labels (all rules) at connection", all_labels.len());
+    let json: serde_json::Value = response.json().await
+        .context("Failed to parse list_rule_ids response")?;
+
+    let mut all_labels = HashMap::new();
+
+    // Response format: {"items": [...]} or potentially {"items": {"id": {...}}}
+    if let Some(items) = json.get("items") {
+        // Handle array format: [{"id": "...", "descr": "..."}, ...]
+        if let Some(arr) = items.as_array() {
+            for (i, item) in arr.iter().enumerate() {
+                // Check max_rules limit
+                if let Some(max) = max_rules {
+                    if i >= max {
+                        warn!("Limiting rule fetch to {} rules to prevent memory exhaustion", max);
+                        break;
+                    }
+                }
+
+                if let Some((id, descr)) = parse_rule_id_entry(item) {
+                    all_labels.insert(id, descr);
+                }
+            }
+        }
+        // Handle object format: {"rule_id_1": {...}, "rule_id_2": {...}}
+        else if let Some(obj) = items.as_object() {
+            for (i, (key, item)) in obj.iter().enumerate() {
+                // Check max_rules limit
+                if let Some(max) = max_rules {
+                    if i >= max {
+                        warn!("Limiting rule fetch to {} rules to prevent memory exhaustion", max);
+                        break;
+                    }
+                }
+
+                // The key might be the ID itself
+                let descr = item.get("descr")
+                    .or_else(|| item.get("description"))
+                    .or_else(|| item.get("label"))
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                if !key.is_empty() {
+                    all_labels.insert(key.clone(), descr);
+                }
+            }
+        }
+    } else {
+        // Log the actual response structure for debugging
+        let keys: Vec<&str> = json.as_object()
+            .map(|o| o.keys().map(String::as_str).collect())
+            .unwrap_or_default();
+        debug!("Unexpected list_rule_ids response format. Top-level keys: {:?}", keys);
+    }
+
+    if all_labels.is_empty() {
+        info!("No rule labels found in OPNsense diagnostics API");
+    } else {
+        info!("Fetched {} rule labels via /api/diagnostics/firewall/list_rule_ids", all_labels.len());
+    }
+
     Ok(all_labels)
+}
+
+/// Parse a single rule entry from the list_rule_ids response
+fn parse_rule_id_entry(item: &serde_json::Value) -> Option<(String, String)> {
+    // Try various field names for the rule ID
+    let id = item.get("id")
+        .or_else(|| item.get("nr"))
+        .or_else(|| item.get("number"))
+        .or_else(|| item.get("uuid"))
+        .or_else(|| item.get("rule"))
+        .and_then(|v| {
+            v.as_str()
+                .map(String::from)
+                .or_else(|| v.as_i64().map(|n| n.to_string()))
+                .or_else(|| v.as_u64().map(|n| n.to_string()))
+        })?;
+
+    // Try various field names for the description/label
+    let descr = item.get("descr")
+        .or_else(|| item.get("description"))
+        .or_else(|| item.get("label"))
+        .or_else(|| item.get("name"))
+        .and_then(|d| d.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    Some((id, descr))
 }
 
 #[cfg(test)]
@@ -476,8 +491,8 @@ pub async fn fetch_aliases_batch(
 
 /// Fetch all aliases from OPNsense API at connection time (no log file required).
 ///
-/// Uses GET /api/firewall/alias_util/aliases for the list of names, then
-/// GET /api/firewall/alias_util/list/{name} per alias to get content.
+/// Uses GET /api/firewall/alias/export to get all configured aliases in one request.
+/// Response format: {"aliases": {"alias": {"uuid": {"name": "...", "type": "...", "content": "...", "description": "..."}}}}
 /// Builds IP → Vec<AliasMapping> so log IPs can be resolved without prior knowledge.
 pub async fn fetch_all_aliases(
     credentials: &ApiCredentials,
@@ -493,14 +508,24 @@ pub async fn fetch_aliases_with_limit(
     let client = build_api_client(credentials)?;
     let base = credentials.endpoint_url.trim_end_matches('/');
 
-    // 1) Get list of alias names
-    let list_url = format!("{}/api/firewall/alias_util/aliases", base);
-    let resp = client
-        .get(&list_url)
+    // Use /api/firewall/alias/export to get all aliases in one request
+    let export_url = format!("{}/api/firewall/alias/export", base);
+
+    debug!("Fetching all aliases from OPNsense API via /api/firewall/alias/export");
+
+    let request_future = client
+        .get(&export_url)
         .basic_auth(&credentials.api_key, Some(&credentials.api_secret))
-        .send()
-        .await
-        .context("Failed to fetch alias list")?;
+        .send();
+
+    // Add timeout for the export request (10 seconds)
+    let resp = match tokio::time::timeout(std::time::Duration::from_secs(10), request_future).await {
+        Ok(result) => result.context("Failed to fetch alias export")?,
+        Err(_) => {
+            warn!("Alias export fetch timed out after 10 seconds");
+            return Err(ApiError::TimeoutError(10).into());
+        }
+    };
 
     if !resp.status().is_success() {
         if resp.status() == 401 {
@@ -510,129 +535,109 @@ pub async fn fetch_aliases_with_limit(
     }
 
     let json: serde_json::Value = resp.json().await
-        .context("Failed to parse alias list")?;
+        .context("Failed to parse alias export response")?;
 
-    // alias_util/aliases: {"data":["A","B"]} or {"aliases":["A","B"]} or {"status":"ok","data":[...]}
-    let names: Vec<String> = if let Some(arr) = json.get("data").and_then(|d| d.as_array()) {
-        arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
-    } else if let Some(arr) = json.get("aliases").and_then(|a| a.as_array()) {
-        arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
-    } else if let Some(obj) = json.get("data").and_then(|d| d.as_object()) {
-        obj.keys().map(String::from).collect()
-    } else if let Some(arr) = json.as_array() {
-        arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
-    } else if let Some(arr) = json.get("rows").and_then(|r| r.as_array()) {
-        arr.iter()
-            .filter_map(|r| r.get("name").and_then(|n| n.as_str()).map(String::from))
-            .collect()
-    } else {
-        debug!("alias_util/aliases unexpected format (keys: {:?})", json.as_object().map(|o| o.keys().collect::<Vec<_>>()));
-        return Ok(HashMap::new());
-    };
-
-    if names.is_empty() {
-        info!("No aliases reported by OPNsense, alias cache will be empty");
-        return Ok(HashMap::new());
-    }
-
-    // 2) For each alias, get content and build IP → Vec<AliasMapping>
+    // Response format: {"aliases": {"alias": {"uuid1": {...}, "uuid2": {...}}}}
+    // or potentially: {"aliases": {"alias": [{...}, {...}]}}
     let mut ip_to_aliases: HashMap<String, Vec<AliasMapping>> = HashMap::new();
+    let mut alias_count = 0;
 
-    // Limit aliases to prevent memory exhaustion
-    let names_to_process = if let Some(max) = max_aliases {
-        if names.len() > max {
-            warn!("Limiting alias fetch to {} aliases (found {}) to prevent memory exhaustion", max, names.len());
-            &names[..max]
-        } else {
-            &names
+    // Try to extract aliases from the response
+    let aliases_data = json.get("aliases")
+        .and_then(|a| a.get("alias"));
+
+    if let Some(alias_obj) = aliases_data {
+        // Handle object format: {"uuid1": {...}, "uuid2": {...}}
+        if let Some(obj) = alias_obj.as_object() {
+            for (_uuid, alias_data) in obj.iter() {
+                // Check max_aliases limit
+                if let Some(max) = max_aliases {
+                    if alias_count >= max {
+                        warn!("Limiting alias fetch to {} aliases to prevent memory exhaustion", max);
+                        break;
+                    }
+                }
+
+                if let Some(mapping) = parse_alias_export_entry(alias_data) {
+                    // Add mapping for each IP/content in this alias
+                    for ip in &mapping.group_members {
+                        ip_to_aliases.entry(ip.clone()).or_default().push(mapping.clone());
+                    }
+                    alias_count += 1;
+                }
+            }
+        }
+        // Handle array format: [{...}, {...}]
+        else if let Some(arr) = alias_obj.as_array() {
+            for alias_data in arr {
+                // Check max_aliases limit
+                if let Some(max) = max_aliases {
+                    if alias_count >= max {
+                        warn!("Limiting alias fetch to {} aliases to prevent memory exhaustion", max);
+                        break;
+                    }
+                }
+
+                if let Some(mapping) = parse_alias_export_entry(alias_data) {
+                    for ip in &mapping.group_members {
+                        ip_to_aliases.entry(ip.clone()).or_default().push(mapping.clone());
+                    }
+                    alias_count += 1;
+                }
+            }
         }
     } else {
-        &names
-    };
-
-    for name in names_to_process {
-        let path_name = name.replace(' ', "%20");
-        let detail_url = format!("{}/api/firewall/alias_util/list/{}", base, path_name);
-
-        // Add timeout for individual alias requests (3 seconds per alias)
-        let request_future = client
-            .get(&detail_url)
-            .basic_auth(&credentials.api_key, Some(&credentials.api_secret))
-            .send();
-
-        let detail_resp = match tokio::time::timeout(std::time::Duration::from_secs(3), request_future).await {
-            Ok(result) => match result {
-                Ok(r) if r.status().is_success() => r,
-                Ok(r) => {
-                    debug!("alias_util/list/{} returned {}", name, r.status());
-                    continue;
-                }
-                Err(e) => {
-                    warn!("alias_util/list/{} failed: {}", name, e);
-                    continue;
-                }
-            },
-            Err(_) => {
-                warn!("Alias fetch timed out after 3 seconds for alias: {}", name);
-                continue;
-            }
-        };
-
-        let text = match detail_resp.text().await {
-            Ok(t) => t,
-            Err(e) => {
-                warn!("Failed to read alias list body for {}: {}", name, e);
-                continue;
-            }
-        };
-
-        // alias_util/list returns grid JSON: {"total":N,"rows":[{"ip":"1.2.3.4"},...]} per OPNsense API
-        let ips: Vec<String> = if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-            if let Some(rows) = v.get("rows").and_then(|r| r.as_array()) {
-                rows.iter()
-                    .filter_map(|row| {
-                        row.get("ip")
-                            .or_else(|| row.get("address"))
-                            .or_else(|| row.get("content"))
-                            .and_then(|x| x.as_str())
-                            .map(String::from)
-                    })
-                    .filter(|s| !s.is_empty())
-                    .collect()
-            } else if let Some(s) = v.get("content").and_then(|c| c.as_str()) {
-                s.split([',', '\n', ';'])
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect()
-            } else if let Some(arr) = v.as_array() {
-                arr.iter().filter_map(|x| x.as_str().map(String::from)).collect()
-            } else {
-                text.split([',', '\n', ';'])
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect()
-            }
-        } else {
-            text.split([',', '\n', ';'])
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        };
-
-        let mapping = AliasMapping {
-            alias_name: name.clone(),
-            group_members: ips.clone(),
-            description: None,
-            alias_type: None,
-        };
-
-        for ip in ips {
-            ip_to_aliases.entry(ip).or_default().push(mapping.clone());
-        }
+        // Log the actual response structure for debugging
+        let keys: Vec<&str> = json.as_object()
+            .map(|o| o.keys().map(String::as_str).collect())
+            .unwrap_or_default();
+        debug!("Unexpected alias export response format. Top-level keys: {:?}", keys);
     }
 
-    info!("Fetched all aliases at connection: {} unique IPs", ip_to_aliases.len());
+    if alias_count == 0 {
+        info!("No aliases found in OPNsense export, alias cache will be empty");
+    } else {
+        info!("Fetched {} aliases ({} unique IPs) via /api/firewall/alias/export",
+              alias_count, ip_to_aliases.len());
+    }
+
     Ok(ip_to_aliases)
+}
+
+/// Parse a single alias entry from the export response
+fn parse_alias_export_entry(alias_data: &serde_json::Value) -> Option<AliasMapping> {
+    let name = alias_data.get("name")
+        .and_then(|n| n.as_str())
+        .map(String::from)?;
+
+    // Get content - can be comma-separated IPs, networks, or other values
+    let content = alias_data.get("content")
+        .and_then(|c| c.as_str())
+        .unwrap_or("");
+
+    // Parse content into group members
+    let group_members: Vec<String> = content
+        .split([',', '\n', ';', ' '])
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let description = alias_data.get("description")
+        .or_else(|| alias_data.get("descr"))
+        .and_then(|d| d.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+
+    let alias_type = alias_data.get("type")
+        .and_then(|t| t.as_str())
+        .map(String::from);
+
+    Some(AliasMapping {
+        alias_name: name,
+        group_members,
+        description,
+        alias_type,
+    })
 }
 
 // ============================================================================

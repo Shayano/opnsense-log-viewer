@@ -317,6 +317,8 @@ mod tests {
             total_in_source: 1000,
             export_scope: ExportScope::Filtered,
             enrichment_status: None,
+            export_checksum: None,
+            verification: None,
         };
 
         let entries = vec![
@@ -377,6 +379,8 @@ mod tests {
             total_in_source: 1000,
             export_scope: ExportScope::Filtered,
             enrichment_status: None,
+            export_checksum: None,
+            verification: None,
         };
 
         let entries = vec![
@@ -422,6 +426,8 @@ mod tests {
             total_in_source: 1000,
             export_scope: ExportScope::Filtered,
             enrichment_status: None,
+            export_checksum: None,
+            verification: None,
         };
 
         let entries = vec![];
@@ -456,6 +462,8 @@ mod tests {
             total_in_source: 10000,
             export_scope: ExportScope::FullDataset,
             enrichment_status: None,
+            export_checksum: None,
+            verification: None,
         };
 
         // Generate 10K test entries
@@ -475,13 +483,13 @@ mod tests {
         let exporter = CsvExporter::new(metadata);
         let cancel_flag = Arc::new(AtomicBool::new(false));
 
-        let mut progress_calls = 0;
+        let progress_calls = std::cell::Cell::new(0);
         let result = exporter.export_streaming(
             entries,
             &temp_path,
             10000,
             |current, total| {
-                progress_calls += 1;
+                progress_calls.set(progress_calls.get() + 1);
                 assert!(current <= total);
             },
             cancel_flag,
@@ -489,7 +497,7 @@ mod tests {
 
         assert_eq!(result.entries_written, 10000);
         assert!(result.file_size_bytes > 0);
-        assert!(progress_calls > 0); // Progress callback should be called
+        assert!(progress_calls.get() > 0); // Progress callback should be called
 
         // Verify file contents
         let contents = std::fs::read_to_string(&temp_path).unwrap();
@@ -514,6 +522,8 @@ mod tests {
             total_in_source: 10000,
             export_scope: ExportScope::FullDataset,
             enrichment_status: None,
+            export_checksum: None,
+            verification: None,
         };
 
         let entries = (0..10000).map(|i| ExportLogEntry {
@@ -566,6 +576,8 @@ mod tests {
             total_in_source: 10000,
             export_scope: ExportScope::Filtered,
             enrichment_status: None,
+            export_checksum: None,
+            verification: None,
         };
 
         let entries = (0..1000).map(|i| ExportLogEntry {
