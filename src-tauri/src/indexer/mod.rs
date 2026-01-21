@@ -6,6 +6,7 @@ pub mod hybrid;
 pub mod parallel;
 pub mod streaming;  // Story 6.1: Memory-efficient streaming indexation
 pub mod interner;   // Story 6.1: String interning for memory efficiency
+pub mod tiered;     // Story 6.1: Tiered index architecture (hot/warm tiers)
 
 // Re-export public API
 pub use inverted::InvertedIndex;
@@ -16,3 +17,4 @@ pub use hybrid::{HybridIndex, IndexMetadata, IndexError};
 pub use parallel::build_index_parallel;
 pub use streaming::build_index_streaming;
 pub use interner::{StringInterner, StringKey, LocalInterner};
+pub use tiered::{TieredIndex, TieredConfig, HotIndex, WarmIndex, TieredQueryExecutor};
