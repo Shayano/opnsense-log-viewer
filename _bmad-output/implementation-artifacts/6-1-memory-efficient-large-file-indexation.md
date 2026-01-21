@@ -108,6 +108,17 @@ so that I can analyze massive log datasets on standard hardware without running 
   - [ ] 5.4: Validate query performance remains <750ms with tiered architecture
   - [ ] 5.5: Document performance characteristics in README
 
+- [ ] Task 6: Integrate TieredIndex into streaming merge phase (AC: #1, #3, #4) - PENDING
+  - [ ] 6.1: Modify `streaming.rs` final merge to output TieredIndex instead of HybridIndex
+  - [ ] 6.2: During merge, write older entries directly to WarmIndex (mmap) instead of accumulating in RAM
+  - [ ] 6.3: Keep only last N entries (configurable, default 5M) in HotIndex during merge
+  - [ ] 6.4: Update `hybrid.rs` to use TieredIndex for files exceeding hot tier threshold
+  - [ ] 6.5: Integrate TieredQueryExecutor with existing QueryExecutor in `query/executor.rs`
+  - [ ] 6.6: Add tests for streaming → tiered integration with memory profiling
+  - **Problem solved:** Final merge phase currently loads ALL batch indexes into RAM causing 6% CPU + growing RAM
+  - **Solution:** Incrementally write to WarmIndex during merge, only HotIndex stays in RAM
+  - **Expected result:** Flat ~500MB RAM during merge instead of unbounded growth
+
 ## Dev Notes
 
 ### Relevant Architecture Patterns and Constraints
