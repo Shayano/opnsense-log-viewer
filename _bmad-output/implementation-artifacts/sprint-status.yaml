@@ -70,12 +70,13 @@ project_key: opnsense-log-viewer
 tracking_system: file-system
 story_location: C:\Tools\opnsense-log-viewer\_bmad-output\implementation-artifacts
 development_status:
-    epic-0: done # All foundation stories complete (Story 0-5 Tauri v2 migration fixed)
+    epic-0: done # All foundation stories complete (including Story 0-6 UI cleanup)
     0-1-project-scaffolding-with-tauri-react: done
     0-2-comprehensive-test-infrastructure: done
     0-3-tailwind-css-design-system-foundation: done
     0-4-typescript-build-test-alignment: done # Fixed 74 TypeScript build errors
     0-5-tauri-v2-migration-api-fixes: done # Fixed 15 Rust compilation errors - backend builds successfully
+    0-6-app-ui-cleanup-remove-component-showcase: done # Remove development artifact from production UI
     epic-0-retrospective: optional
     epic-1: done
     1-1-file-selection-with-native-os-picker: done
