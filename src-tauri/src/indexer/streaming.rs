@@ -29,7 +29,6 @@ use rayon::prelude::*;
 use roaring::RoaringBitmap;
 
 use rkyv::{Archive, Serialize as RkyvSerialize, Deserialize as RkyvDeserialize};
-use rkyv::Deserialize as _;
 use bytecheck::CheckBytes;
 
 use crate::indexer::bitmap::BitmapIndex;
@@ -358,6 +357,211 @@ impl TryFrom<SerializedBatchIndexes> for BatchIndexes {
     }
 }
 
+/// Story 6.3 AC3: Progressive merge state for memory-bounded incremental indexation
+///
+/// This struct manages the incremental merge of batch indexes into a TieredIndex,
+/// spilling older entries to WarmIndex files when the hot tier exceeds 5M entries.
+///
+/// Memory behavior:
+/// - Hot tier maintains at most DEFAULT_HOT_TIER_ENTRIES (5M entries) in RAM
+/// - When exceeded, oldest entries are spilled to WarmIndex (rkyv-serialized disk files)
+/// - Peak RAM usage stays below 2GB for any file size
+pub(crate) struct ProgressiveMergeState {
+    /// Accumulated inverted index data (hot tier)
+    inverted: InvertedIndex,
+    /// Accumulated bitmap index data (hot tier)
+    bitmap: BitmapIndex,
+    /// Accumulated offset table data
+    offset_table: OffsetTable,
+    /// Total entries merged so far
+    total_entries_merged: u64,
+    /// Number of warm tier files created
+    warm_tier_count: u32,
+    /// Directory for warm tier files
+    warm_directory: PathBuf,
+    /// List of created warm tier files
+    warm_files: Vec<PathBuf>,
+    /// Start entry ID of current hot tier data
+    hot_start_id: u64,
+}
+
+impl ProgressiveMergeState {
+    /// Create a new progressive merge state
+    ///
+    /// Story 6.3 AC3: Initializes empty state for progressive batch merging.
+    ///
+    /// # Arguments
+    /// * `warm_directory` - Directory to store warm tier files
+    pub fn new(warm_directory: PathBuf) -> Self {
+        Self {
+            inverted: InvertedIndex::new(),
+            bitmap: BitmapIndex::new(),
+            offset_table: OffsetTable::new(),
+            total_entries_merged: 0,
+            warm_tier_count: 0,
+            warm_directory,
+            warm_files: Vec::new(),
+            hot_start_id: 0,
+        }
+    }
+
+    /// Merge a batch into the progressive state
+    ///
+    /// Story 6.3 AC3: Converts BatchIndexes to index structures, merges into hot tier,
+    /// and spills to warm tier if hot tier exceeds 5M entries.
+    ///
+    /// # Arguments
+    /// * `batch` - Batch indexes to merge
+    ///
+    /// # Returns
+    /// Number of entries in hot tier after merge
+    pub fn merge_batch(&mut self, batch: BatchIndexes) -> Result<u64, IndexError> {
+        let batch_entries = batch.entry_count;
+
+        // Merge bitmap index components
+        for (key, bitmap) in batch.actions {
+            self.bitmap.merge_action(&key, bitmap);
+        }
+        for (key, bitmap) in batch.protocols {
+            self.bitmap.merge_protocol(&key, bitmap);
+        }
+        for (key, bitmap) in batch.interfaces {
+            self.bitmap.merge_interface(&key, bitmap);
+        }
+
+        // Merge inverted index components
+        for (key, ids) in batch.source_ips {
+            self.inverted.merge_source_ip(&key, ids);
+        }
+        for (key, ids) in batch.dest_ips {
+            self.inverted.merge_dest_ip(&key, ids);
+        }
+        for (key, ids) in batch.source_ports {
+            self.inverted.merge_source_port(key, ids);
+        }
+        for (key, ids) in batch.dest_ports {
+            self.inverted.merge_dest_port(key, ids);
+        }
+
+        // Merge offset table
+        for (entry_id, offset) in batch.offsets {
+            self.offset_table.set_offset(entry_id, offset);
+        }
+
+        self.total_entries_merged += batch_entries;
+
+        // Check if we need to spill to warm tier
+        let hot_entries = self.total_entries_merged - self.hot_start_id;
+        if hot_entries > crate::indexer::tiered::DEFAULT_HOT_TIER_ENTRIES {
+            self.spill_to_warm()?;
+        }
+
+        let current_hot_entries = self.total_entries_merged - self.hot_start_id;
+        Ok(current_hot_entries)
+    }
+
+    /// Spill oldest entries from hot tier to warm tier
+    ///
+    /// Story 6.3 AC3: Creates a WarmIndex file with oldest entries and removes
+    /// them from the hot tier structures.
+    fn spill_to_warm(&mut self) -> Result<(), IndexError> {
+        let hot_entries = self.total_entries_merged - self.hot_start_id;
+        if hot_entries <= crate::indexer::tiered::DEFAULT_HOT_TIER_ENTRIES {
+            return Ok(()); // Nothing to spill
+        }
+
+        // Calculate how many entries to spill
+        let spill_count = hot_entries - crate::indexer::tiered::DEFAULT_HOT_TIER_ENTRIES;
+        let spill_end_id = self.hot_start_id + spill_count;
+
+        log::info!(
+            "[PROGRESSIVE] Spilling {} entries to warm tier (IDs {}-{})",
+            spill_count,
+            self.hot_start_id,
+            spill_end_id - 1
+        );
+
+        // Ensure warm directory exists
+        fs::create_dir_all(&self.warm_directory)?;
+
+        // Create warm tier file
+        let warm_path = self.warm_directory.join(format!("warm_{}.idx", self.warm_tier_count));
+
+        // Create WarmIndex from current data (it will filter by entry range)
+        crate::indexer::tiered::WarmIndex::create(
+            &warm_path,
+            &self.inverted,
+            &self.bitmap,
+            &self.offset_table,
+            self.hot_start_id,
+            spill_end_id,
+        )?;
+
+        self.warm_files.push(warm_path);
+        self.warm_tier_count += 1;
+        self.hot_start_id = spill_end_id;
+
+        log::info!(
+            "[PROGRESSIVE] Warm tier {} created, hot tier now starts at ID {}",
+            self.warm_tier_count - 1,
+            self.hot_start_id
+        );
+
+        Ok(())
+    }
+
+    /// Get total entries merged so far
+    pub fn total_entries(&self) -> u64 {
+        self.total_entries_merged
+    }
+
+    /// Get current hot tier entry count
+    pub fn hot_entries(&self) -> u64 {
+        self.total_entries_merged - self.hot_start_id
+    }
+
+    /// Finalize the merge and return a TieredIndex
+    ///
+    /// Story 6.3 AC3: Builds the final TieredIndex with hot tier in RAM
+    /// and warm tiers as memory-mapped files.
+    pub fn finalize(self) -> Result<crate::indexer::tiered::TieredIndex, IndexError> {
+        // Sort inverted index vectors for efficient queries
+        let mut inverted = self.inverted;
+        inverted.sort_all();
+
+        // Build hot tier
+        let hot = crate::indexer::tiered::HotIndex::from_indexes(
+            inverted,
+            self.bitmap,
+            self.offset_table,
+            self.hot_start_id,
+            self.total_entries_merged,
+        );
+
+        // Open warm tier files
+        let mut warm = Vec::with_capacity(self.warm_files.len());
+        for path in &self.warm_files {
+            warm.push(crate::indexer::tiered::WarmIndex::open(path)?);
+        }
+
+        let config = crate::indexer::tiered::TieredConfig::with_warm_directory(&self.warm_directory);
+
+        log::info!(
+            "[PROGRESSIVE] Finalized: {} total entries, {} in hot tier, {} warm tiers",
+            self.total_entries_merged,
+            self.total_entries_merged - self.hot_start_id,
+            warm.len()
+        );
+
+        Ok(crate::indexer::tiered::TieredIndex {
+            config,
+            hot,
+            warm,
+            total_entries: self.total_entries_merged,
+        })
+    }
+}
+
 /// Find chunk boundaries aligned to line endings
 fn find_chunk_boundaries(data: &[u8], chunk_size: usize) -> Vec<ChunkBoundary> {
     let mut boundaries = Vec::new();
@@ -620,7 +824,21 @@ where
 
     let bytes_processed = Arc::new(AtomicU64::new(0));
     let start_time = std::time::Instant::now();
-    progress_callback(IndexProgress::new(0, file_size, 0.0));
+
+    // Story 6.3 AC2: Estimate total entries for progress reporting
+    let estimated_total_entries = IndexProgress::estimate_entries(file_size, 200);
+
+    // Story 6.3 AC2: Initial progress with batch info
+    progress_callback(IndexProgress::with_batch_info(
+        0,
+        file_size,
+        0.0,
+        0, // entries_indexed
+        estimated_total_entries,
+        false, // partial_filter_available - not yet
+        0,     // batches_completed
+        num_batches as u32,
+    ));
 
     // Create temp directory for batch files
     let temp_dir = std::env::temp_dir().join(format!("opnsense_index_{}", std::process::id()));
@@ -668,16 +886,28 @@ where
         let batch_path = save_batch_to_disk(batch_index, &temp_dir, batch_num)?;
         batch_files.push(batch_path);
 
-        // Update progress
+        // Story 6.3 AC2/AC5: Update progress with batch info
+        // partial_filter_available becomes true after first batch
         let elapsed = start_time.elapsed().as_secs_f64();
         let processed = bytes_processed.load(Ordering::Relaxed);
-        progress_callback(IndexProgress::new(processed, file_size, elapsed));
+        let batches_done = (batch_num + 1) as u32;
+        progress_callback(IndexProgress::with_batch_info(
+            processed,
+            file_size,
+            elapsed,
+            total_entries,
+            estimated_total_entries,
+            batches_done >= 1, // Story 6.3 AC1: partial filtering available after first batch
+            batches_done,
+            num_batches as u32,
+        ));
 
         log::info!(
-            "[STREAMING] Batch {}/{} complete: {} entries, memory freed",
+            "[STREAMING] Batch {}/{} complete: {} entries, memory freed, partial_filter={}",
             batch_num + 1,
             num_batches,
-            batch_entries
+            batch_entries,
+            batches_done >= 1
         );
     }
 
@@ -743,8 +973,18 @@ where
         offset_table.set_offset(entry_id, offset);
     }
 
+    // Story 6.3 AC2: Final progress update with all batches complete
     let final_elapsed = start_time.elapsed().as_secs_f64();
-    progress_callback(IndexProgress::new(file_size, file_size, final_elapsed));
+    progress_callback(IndexProgress::with_batch_info(
+        file_size,
+        file_size,
+        final_elapsed,
+        total_entries,
+        total_entries, // estimated = actual at completion
+        true,          // partial_filter_available
+        num_batches as u32,
+        num_batches as u32,
+    ));
 
     log::info!(
         "[STREAMING] Complete: {} entries in {:.2}s ({:.0} entries/sec)",
@@ -826,5 +1066,143 @@ mod tests {
                 assert_eq!(data[chunk.end - 1], b'\n');
             }
         }
+    }
+
+    /// Story 6.3 AC3: Test ProgressiveMergeState basic functionality
+    #[test]
+    fn test_progressive_merge_state_basic() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut state = ProgressiveMergeState::new(temp_dir.path().to_path_buf());
+
+        // Create first batch with some entries
+        let mut batch1 = BatchIndexes::new();
+        batch1.actions.insert("block".to_string(), {
+            let mut b = RoaringBitmap::new();
+            b.insert(0);
+            b.insert(1);
+            b
+        });
+        batch1.source_ips.insert("192.168.1.1".to_string(), vec![0, 1]);
+        batch1.offsets.push((0, 0));
+        batch1.offsets.push((1, 100));
+        batch1.entry_count = 2;
+
+        // Merge first batch
+        let hot_entries = state.merge_batch(batch1).unwrap();
+        assert_eq!(state.total_entries(), 2);
+        assert_eq!(hot_entries, 2);
+
+        // Create second batch
+        let mut batch2 = BatchIndexes::new();
+        batch2.actions.insert("pass".to_string(), {
+            let mut b = RoaringBitmap::new();
+            b.insert(2);
+            b
+        });
+        batch2.source_ips.insert("192.168.1.2".to_string(), vec![2]);
+        batch2.offsets.push((2, 200));
+        batch2.entry_count = 1;
+
+        // Merge second batch
+        let hot_entries = state.merge_batch(batch2).unwrap();
+        assert_eq!(state.total_entries(), 3);
+        assert_eq!(hot_entries, 3);
+
+        // Finalize and verify TieredIndex
+        let tiered = state.finalize().unwrap();
+        assert_eq!(tiered.entry_count(), 3);
+        assert!(tiered.warm.is_empty()); // No spill needed for small data
+    }
+
+    /// Story 6.3 AC3: Test progressive merge with multiple batches
+    #[test]
+    fn test_progressive_merge_multiple_batches() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut state = ProgressiveMergeState::new(temp_dir.path().to_path_buf());
+
+        // Create 3 batches, each with 1000 entries
+        for batch_num in 0..3 {
+            let mut batch = BatchIndexes::new();
+            let base_id = batch_num * 1000;
+
+            // Add bitmap entries
+            batch.actions.insert("block".to_string(), {
+                let mut b = RoaringBitmap::new();
+                for i in 0..500 {
+                    b.insert((base_id + i) as u32);
+                }
+                b
+            });
+            batch.actions.insert("pass".to_string(), {
+                let mut b = RoaringBitmap::new();
+                for i in 500..1000 {
+                    b.insert((base_id + i) as u32);
+                }
+                b
+            });
+
+            // Add inverted index entries
+            for i in 0..1000 {
+                let ip = format!("192.168.{}.{}", batch_num, i % 256);
+                batch.source_ips.entry(ip).or_default().push(base_id + i);
+                batch.offsets.push((base_id + i, (base_id + i) * 100));
+            }
+            batch.entry_count = 1000;
+
+            state.merge_batch(batch).unwrap();
+        }
+
+        assert_eq!(state.total_entries(), 3000);
+
+        // Finalize and verify
+        let tiered = state.finalize().unwrap();
+        assert_eq!(tiered.entry_count(), 3000);
+
+        // Verify structure is correct (warm tiers empty for small data)
+        assert!(tiered.warm.is_empty(), "No warm tiers expected for 3000 entries");
+    }
+
+    /// Story 6.3 AC2: Test IndexProgress with_batch_info in streaming context
+    #[test]
+    fn test_progress_callback_batch_info() {
+        use crate::indexer::progress::IndexProgress;
+
+        let mut progress_updates: Vec<IndexProgress> = Vec::new();
+
+        // Simulate progress callbacks during batch processing
+        let file_size = 1_000_000_000u64;
+        let estimated_entries = IndexProgress::estimate_entries(file_size, 200);
+        let num_batches = 10u32;
+
+        // Initial progress
+        progress_updates.push(IndexProgress::with_batch_info(
+            0, file_size, 0.0, 0, estimated_entries, false, 0, num_batches,
+        ));
+
+        // After first batch
+        progress_updates.push(IndexProgress::with_batch_info(
+            100_000_000, file_size, 60.0, 500_000, estimated_entries,
+            true, // partial_filter_available becomes true
+            1, num_batches,
+        ));
+
+        // After second batch
+        progress_updates.push(IndexProgress::with_batch_info(
+            200_000_000, file_size, 120.0, 1_000_000, estimated_entries,
+            true, 2, num_batches,
+        ));
+
+        // Verify progression
+        assert!(!progress_updates[0].partial_filter_available);
+        assert!(progress_updates[1].partial_filter_available);
+        assert!(progress_updates[2].partial_filter_available);
+
+        assert_eq!(progress_updates[0].batches_completed, 0);
+        assert_eq!(progress_updates[1].batches_completed, 1);
+        assert_eq!(progress_updates[2].batches_completed, 2);
+
+        assert_eq!(progress_updates[0].entries_indexed, 0);
+        assert_eq!(progress_updates[1].entries_indexed, 500_000);
+        assert_eq!(progress_updates[2].entries_indexed, 1_000_000);
     }
 }

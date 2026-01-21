@@ -53,6 +53,10 @@ pub enum IndexError {
 
     #[error("Serialization error: {0}")]
     SerializationError(String),
+
+    /// Story 6.3 AC4: Lock acquisition failure for concurrent access
+    #[error("Lock error: {0}")]
+    LockError(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

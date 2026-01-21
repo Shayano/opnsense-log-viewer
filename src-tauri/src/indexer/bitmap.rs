@@ -262,6 +262,32 @@ impl BitmapIndex {
             .map(|(k, v)| (k.clone(), v.len()))
             .collect()
     }
+
+    /// Story 6.3: Merge action bitmap from another batch
+    pub fn merge_action(&mut self, action: &str, bitmap: RoaringBitmap) {
+        let key = action.to_lowercase();
+        self.actions
+            .entry(key)
+            .and_modify(|b| *b |= &bitmap)
+            .or_insert(bitmap);
+    }
+
+    /// Story 6.3: Merge protocol bitmap from another batch
+    pub fn merge_protocol(&mut self, protocol: &str, bitmap: RoaringBitmap) {
+        let key = protocol.to_uppercase();
+        self.protocols
+            .entry(key)
+            .and_modify(|b| *b |= &bitmap)
+            .or_insert(bitmap);
+    }
+
+    /// Story 6.3: Merge interface bitmap from another batch
+    pub fn merge_interface(&mut self, interface: &str, bitmap: RoaringBitmap) {
+        self.interfaces
+            .entry(interface.to_string())
+            .and_modify(|b| *b |= &bitmap)
+            .or_insert(bitmap);
+    }
 }
 
 #[cfg(test)]

@@ -41,12 +41,16 @@ impl OffsetTable {
         self.offsets[entry_id as usize] = offset;
     }
 
-    /// Set offset directly (assumes capacity is already allocated)
+    /// Set offset directly (grows vector if needed)
+    ///
+    /// Story 6.3: Updated to resize vector when needed for progressive merge
     #[inline]
     pub fn set_offset(&mut self, entry_id: u64, offset: u64) {
-        if (entry_id as usize) < self.offsets.len() {
-            self.offsets[entry_id as usize] = offset;
+        let idx = entry_id as usize;
+        if idx >= self.offsets.len() {
+            self.offsets.resize(idx + 1, 0);
         }
+        self.offsets[idx] = offset;
     }
 
     /// Get the offset for an entry

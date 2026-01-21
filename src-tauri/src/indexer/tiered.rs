@@ -19,7 +19,6 @@ use memmap2::Mmap;
 use roaring::RoaringBitmap;
 use serde::{Deserialize, Serialize};
 use rkyv::{Archive, Serialize as RkyvSerialize, Deserialize as RkyvDeserialize};
-use rkyv::Deserialize as _;
 use bytecheck::CheckBytes;
 
 use crate::indexer::bitmap::{BitmapIndex, BitmapIndexRkyv};

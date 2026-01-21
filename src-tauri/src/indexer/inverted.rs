@@ -131,6 +131,54 @@ impl InvertedIndex {
 
         size
     }
+
+    /// Story 6.3: Merge source IP entry IDs from another batch
+    pub fn merge_source_ip(&mut self, ip: &str, mut ids: Vec<u64>) {
+        self.source_ips
+            .entry(ip.to_string())
+            .and_modify(|v| v.append(&mut ids))
+            .or_insert(ids);
+    }
+
+    /// Story 6.3: Merge destination IP entry IDs from another batch
+    pub fn merge_dest_ip(&mut self, ip: &str, mut ids: Vec<u64>) {
+        self.dest_ips
+            .entry(ip.to_string())
+            .and_modify(|v| v.append(&mut ids))
+            .or_insert(ids);
+    }
+
+    /// Story 6.3: Merge source port entry IDs from another batch
+    pub fn merge_source_port(&mut self, port: u16, mut ids: Vec<u64>) {
+        self.source_ports
+            .entry(port)
+            .and_modify(|v| v.append(&mut ids))
+            .or_insert(ids);
+    }
+
+    /// Story 6.3: Merge destination port entry IDs from another batch
+    pub fn merge_dest_port(&mut self, port: u16, mut ids: Vec<u64>) {
+        self.dest_ports
+            .entry(port)
+            .and_modify(|v| v.append(&mut ids))
+            .or_insert(ids);
+    }
+
+    /// Story 6.3: Sort all ID vectors for efficient binary search queries
+    pub fn sort_all(&mut self) {
+        for ids in self.source_ips.values_mut() {
+            ids.sort_unstable();
+        }
+        for ids in self.dest_ips.values_mut() {
+            ids.sort_unstable();
+        }
+        for ids in self.source_ports.values_mut() {
+            ids.sort_unstable();
+        }
+        for ids in self.dest_ports.values_mut() {
+            ids.sort_unstable();
+        }
+    }
 }
 
 #[cfg(test)]
