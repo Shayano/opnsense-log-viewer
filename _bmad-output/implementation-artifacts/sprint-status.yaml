@@ -110,6 +110,9 @@ development_status:
     5-2-full-dataset-export-with-streaming: done
     5-3-export-integrity-verification: done
     epic-5-retrospective: optional
+    epic-6: in-progress # Performance & Memory Optimization - CRITICAL NFR violation fix
+    6-1-memory-efficient-large-file-indexation: in-progress # CRITICAL: 23GB RAM for 14GB file - must fix
+    epic-6-retrospective: optional
 
 # ============================================================================
 # PROJECT STATUS SUMMARY (Updated: 2026-01-19 - Story 0-5 Complete)

@@ -1,3 +1,8 @@
+// Story 6.1: Use mimalloc as global allocator to reduce allocation contention
+// on multi-threaded indexing (reduces lock contention on default allocator)
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 // Modules
 mod commands;
 pub mod parser; // Parser module - Public for integration tests

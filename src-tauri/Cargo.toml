@@ -56,6 +56,11 @@ rayon = "1.10"
 memmap2 = "0.9"
 blake3 = "1.5"  # Fast parallel hashing (10x faster than SHA256)
 
+# Story 6.1: Memory optimization for large file indexation
+lasso = { version = "0.7", features = ["multi-threaded"] }  # String interning (fast, thread-safe)
+mimalloc = { version = "0.1", default-features = false }  # Per-thread allocator
+sysinfo = "0.32"        # Memory monitoring
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1.5"
