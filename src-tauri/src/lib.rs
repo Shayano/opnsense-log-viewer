@@ -1,5 +1,7 @@
 // Story 6.1: Use mimalloc as global allocator to reduce allocation contention
 // on multi-threaded indexing (reduces lock contention on default allocator)
+// Note: Conditionally enabled to avoid conflicts with test allocators (e.g., PeakAlloc)
+#[cfg(feature = "mimalloc-allocator")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

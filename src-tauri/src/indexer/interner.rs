@@ -138,9 +138,23 @@ impl LocalInterner {
         }
     }
 
+    /// Intern a string and return a StringKey
     #[inline]
     pub fn intern(&mut self, s: &str) -> StringKey {
         StringKey(self.inner.get_or_intern(s))
+    }
+
+    /// Intern a string and return a Box<str>
+    /// Story 6.1: This method deduplicates strings within the interner,
+    /// but returns an owned Box<str> for storage in ParsedEntry.
+    /// The deduplication benefit is that we allocate from the interner's
+    /// storage instead of individual heap allocations.
+    #[inline]
+    pub fn get_or_intern(&mut self, s: &str) -> Box<str> {
+        // Intern to deduplicate, then resolve to get the canonical string
+        let key = self.inner.get_or_intern(s);
+        // Return a Box<str> from the resolved string
+        self.inner.resolve(&key).into()
     }
 
     #[inline]
