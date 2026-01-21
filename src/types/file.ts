@@ -71,6 +71,48 @@ export interface SourceFileMetadata {
 }
 
 /**
+ * Progress data during indexation (from Rust backend)
+ * Extended with batch tracking fields from Story 6.3 progressive indexation
+ */
+export interface IndexProgress {
+  /** Percentage complete (0-100) */
+  percentage: number;
+  /** Bytes processed so far */
+  bytesProcessed: number;
+  /** Total bytes to process */
+  totalBytes: number;
+  /** Current indexation speed in GB/min */
+  speedGbps: number;
+  /** Estimated seconds remaining */
+  etaSeconds: number;
+  /** Number of entries processed so far */
+  entriesProcessed: number;
+  /** Estimated total entries (refined as indexation progresses) */
+  totalEntriesEstimate: number;
+  /** Current batch number being processed */
+  currentBatch: number;
+  /** Total number of batches */
+  totalBatches: number;
+  /** True when first batch completes - filtering can begin */
+  partialFilterAvailable: boolean;
+}
+
+/**
+ * Cache event payload from backend (Story 6.4)
+ * Emitted on "index-cache-hit" and "index-cache-miss" events
+ */
+export interface IndexCacheEvent {
+  /** Path to the file being indexed */
+  filePath: string;
+  /** Whether index was loaded from cache */
+  cacheHit: boolean;
+  /** Age of cached index in seconds (null if cache miss) */
+  cacheAgeSeconds: number | null;
+  /** Reason for cache miss (null if cache hit) */
+  reason: string | null;
+}
+
+/**
  * Note: load_index_file command uses Tauri Result pattern:
  * - Success: Returns IndexMetadata directly
  * - NotFound: Throws error with message containing "No saved index"
