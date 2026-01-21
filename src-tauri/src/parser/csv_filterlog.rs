@@ -1,57 +1,116 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use csv::ReaderBuilder;
 use crate::types::log_entry::{LogEntry, LogFormat, ParseError, ParseResult};
 
-// OPNsense CSV filterlog field indices (may vary by version)
-const IDX_TIMESTAMP: usize = 0;
+// OPNsense filterlog CSV field indices (within the CSV part after syslog prefix)
+// Format: RULE_NUM,SUB_RULE,ANCHOR,TRACKER,INTERFACE,REASON,ACTION,DIRECTION,IP_VER,TOS,ECN,TTL,ID,OFFSET,FLAGS,PROTO_NUM,PROTO_NAME,LENGTH,SRC_IP,DST_IP,SRC_PORT,DST_PORT,...
+const IDX_TRACKER: usize = 3;       // Rule hash (used as rule_label)
 const IDX_INTERFACE: usize = 4;
 const IDX_ACTION: usize = 6;
-const IDX_SOURCE_IP: usize = 8;
-const IDX_SOURCE_PORT: usize = 9;
-const IDX_DEST_IP: usize = 10;
-const IDX_DEST_PORT: usize = 11;
-const IDX_PROTOCOL: usize = 16;
-const IDX_RULE_LABEL: usize = 17;
+const IDX_DIRECTION: usize = 7;
+const IDX_PROTOCOL: usize = 16;     // Protocol name (tcp, udp, icmp)
+const IDX_SOURCE_IP: usize = 18;
+const IDX_DEST_IP: usize = 19;
+const IDX_SOURCE_PORT: usize = 20;
+const IDX_DEST_PORT: usize = 21;
 
-/// Fast CSV parsing using direct string splitting
-/// This is 3-5x faster than creating a csv::Reader for each line
-/// because it avoids allocating a new reader per line.
+/// Parse OPNsense filterlog entry
 ///
-/// Note: This simple parser doesn't handle quoted fields with commas inside.
-/// For OPNsense filterlog, fields don't typically contain commas, so this is safe.
+/// Supports two formats:
+/// 1. Native OPNsense syslog: `TIMESTAMP<TAB>SEVERITY<TAB>filterlog<TAB>CSV_DATA`
+/// 2. Pure CSV: `UNIX_TIMESTAMP,RULE_NUM,...`
 pub fn parse_csv_filterlog_entry(line: &str, line_number: u64, entry_id: u64) -> ParseResult<LogEntry> {
-    // Fast path: try simple split first (works for 99% of filterlog lines)
-    let fields: Vec<&str> = line.split(',').collect();
+    // Remove BOM if present (UTF-8 BOM: EF BB BF)
+    let line = line.trim_start_matches('\u{FEFF}');
 
-    // If we have enough fields and no quotes, use fast path
-    if fields.len() >= 10 && !line.contains('"') {
-        return parse_from_fields(&fields, line, line_number, entry_id);
+    // Try to detect and parse OPNsense native syslog format first
+    // Format: ISO_TIMESTAMP<TAB>Informational<TAB>filterlog<TAB>CSV_DATA
+    if let Some((timestamp, csv_part)) = extract_syslog_parts(line) {
+        return parse_filterlog_csv(csv_part, timestamp, line, line_number, entry_id);
     }
 
-    // Fallback to csv crate for complex cases (quoted fields)
-    parse_with_csv_crate(line, line_number, entry_id)
+    // Fallback: try pure CSV format (legacy support)
+    parse_legacy_csv_format(line, line_number, entry_id)
 }
 
-/// Parse from pre-split fields (fast path)
-fn parse_from_fields(fields: &[&str], raw_line: &str, line_number: u64, entry_id: u64) -> ParseResult<LogEntry> {
-    // Parse timestamp
-    let timestamp_str = fields.get(IDX_TIMESTAMP)
-        .ok_or_else(|| ParseError::MalformedCSV {
+/// Extract timestamp and CSV part from OPNsense syslog format
+/// Returns (timestamp, csv_data) if successful
+fn extract_syslog_parts(line: &str) -> Option<(DateTime<Utc>, &str)> {
+    // Split by tab to get syslog fields
+    let parts: Vec<&str> = line.splitn(4, '\t').collect();
+
+    // Need at least 4 parts: timestamp, severity, process, message
+    if parts.len() < 4 {
+        return None;
+    }
+
+    // Verify this is a filterlog entry
+    if !parts[2].trim().eq_ignore_ascii_case("filterlog") {
+        return None;
+    }
+
+    // Parse the ISO timestamp from first field
+    let timestamp_str = parts[0].trim();
+    let timestamp = parse_iso_timestamp(timestamp_str)?;
+
+    // The CSV data is in the 4th field, trim leading space
+    let csv_part = parts[3].trim_start();
+
+    Some((timestamp, csv_part))
+}
+
+/// Parse ISO 8601 timestamp (with or without timezone)
+fn parse_iso_timestamp(s: &str) -> Option<DateTime<Utc>> {
+    // Try RFC3339 first (with timezone)
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Some(dt.with_timezone(&Utc));
+    }
+
+    // Try without timezone (assume UTC)
+    // Format: 2026-01-21T11:07:29
+    if let Ok(naive) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
+        return Some(naive.and_utc());
+    }
+
+    // Try with milliseconds
+    if let Ok(naive) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f") {
+        return Some(naive.and_utc());
+    }
+
+    None
+}
+
+/// Parse the filterlog CSV portion with correct OPNsense field indices
+fn parse_filterlog_csv(
+    csv_data: &str,
+    timestamp: DateTime<Utc>,
+    raw_line: &str,
+    line_number: u64,
+    entry_id: u64,
+) -> ParseResult<LogEntry> {
+    // Fast path: split by comma
+    let fields: Vec<&str> = csv_data.split(',').collect();
+
+    // Need at least 22 fields for a valid filterlog entry with ports
+    if fields.len() < 19 {
+        return Err(ParseError::MalformedCSV {
             line: line_number,
-            reason: "Missing timestamp field".to_string(),
-        })?;
+            reason: format!("Insufficient CSV fields: expected at least 19, got {}", fields.len()),
+        });
+    }
 
-    let timestamp = parse_csv_timestamp(timestamp_str, line_number)?;
+    // Extract fields with correct indices
+    let interface = safe_get_field(&fields, IDX_INTERFACE);
+    let action = safe_get_field(&fields, IDX_ACTION);
+    let protocol = safe_get_field(&fields, IDX_PROTOCOL);
+    let rule_label = safe_get_field(&fields, IDX_TRACKER);
+    let _direction = safe_get_field(&fields, IDX_DIRECTION); // in/out - not used currently
 
-    // Extract fields with bounds checking
-    let interface = safe_get_field(fields, IDX_INTERFACE);
-    let action = safe_get_field(fields, IDX_ACTION);
-    let source_ip = safe_get_field(fields, IDX_SOURCE_IP);
-    let source_port = safe_get_field(fields, IDX_SOURCE_PORT).and_then(|s| s.parse().ok());
-    let dest_ip = safe_get_field(fields, IDX_DEST_IP);
-    let dest_port = safe_get_field(fields, IDX_DEST_PORT).and_then(|s| s.parse().ok());
-    let protocol = safe_get_field(fields, IDX_PROTOCOL);
-    let rule_label = safe_get_field(fields, IDX_RULE_LABEL);
+    // IP and port fields - may not exist for all protocols (e.g., ICMP)
+    let source_ip = safe_get_field(&fields, IDX_SOURCE_IP);
+    let dest_ip = safe_get_field(&fields, IDX_DEST_IP);
+    let source_port = safe_get_field(&fields, IDX_SOURCE_PORT).and_then(|s| s.parse().ok());
+    let dest_port = safe_get_field(&fields, IDX_DEST_PORT).and_then(|s| s.parse().ok());
 
     Ok(LogEntry {
         id: entry_id,
@@ -61,7 +120,7 @@ fn parse_from_fields(fields: &[&str], raw_line: &str, line_number: u64, entry_id
         facility: None,
         severity: None,
         hostname: None,
-        process_name: None,
+        process_name: Some("filterlog".to_string()),
         process_id: None,
         message_id: None,
         structured_data: None,
@@ -74,7 +133,7 @@ fn parse_from_fields(fields: &[&str], raw_line: &str, line_number: u64, entry_id
         action,
         rule_label,
         raw_line: raw_line.to_string(),
-        message: String::new(),
+        message: csv_data.to_string(),
     })
 }
 
@@ -86,32 +145,18 @@ fn safe_get_field(fields: &[&str], index: usize) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// Fallback parser using csv crate (handles quoted fields)
-fn parse_with_csv_crate(line: &str, line_number: u64, entry_id: u64) -> ParseResult<LogEntry> {
-    let mut reader = ReaderBuilder::new()
-        .has_headers(false)
-        .from_reader(line.as_bytes());
+/// Legacy CSV format parser (for backwards compatibility)
+/// Expects pure CSV with Unix timestamp in first field
+fn parse_legacy_csv_format(line: &str, line_number: u64, entry_id: u64) -> ParseResult<LogEntry> {
+    let fields: Vec<&str> = line.split(',').collect();
 
-    let record = reader.records().next()
-        .ok_or_else(|| ParseError::MalformedCSV {
-            line: line_number,
-            reason: "Empty CSV line".to_string(),
-        })?
-        .map_err(|e| ParseError::MalformedCSV {
-            line: line_number,
-            reason: format!("CSV parsing error: {}", e),
-        })?;
-
-    // Ensure minimum field count
-    if record.len() < 10 {
-        return Err(ParseError::MalformedCSV {
-            line: line_number,
-            reason: format!("Insufficient fields: expected at least 10, got {}", record.len()),
-        });
+    if fields.len() < 10 {
+        // Try csv crate for quoted fields
+        return parse_with_csv_crate(line, line_number, entry_id);
     }
 
-    // Parse timestamp (Unix timestamp or ISO format)
-    let timestamp_str = record.get(IDX_TIMESTAMP)
+    // Try to parse first field as Unix timestamp
+    let timestamp_str = fields.get(0)
         .ok_or_else(|| ParseError::MalformedCSV {
             line: line_number,
             reason: "Missing timestamp field".to_string(),
@@ -119,15 +164,25 @@ fn parse_with_csv_crate(line: &str, line_number: u64, entry_id: u64) -> ParseRes
 
     let timestamp = parse_csv_timestamp(timestamp_str, line_number)?;
 
-    // Extract fields with bounds checking
-    let interface = safe_get(&record, IDX_INTERFACE);
-    let action = safe_get(&record, IDX_ACTION);
-    let source_ip = safe_get(&record, IDX_SOURCE_IP);
-    let source_port = safe_get(&record, IDX_SOURCE_PORT).and_then(|s| s.parse().ok());
-    let dest_ip = safe_get(&record, IDX_DEST_IP);
-    let dest_port = safe_get(&record, IDX_DEST_PORT).and_then(|s| s.parse().ok());
-    let protocol = safe_get(&record, IDX_PROTOCOL);
-    let rule_label = safe_get(&record, IDX_RULE_LABEL);
+    // Use legacy indices for backwards compatibility
+    // These were the original indices that might work with some CSV exports
+    const LEGACY_IDX_INTERFACE: usize = 4;
+    const LEGACY_IDX_ACTION: usize = 6;
+    const LEGACY_IDX_SOURCE_IP: usize = 18;
+    const LEGACY_IDX_DEST_IP: usize = 19;
+    const LEGACY_IDX_SOURCE_PORT: usize = 20;
+    const LEGACY_IDX_DEST_PORT: usize = 21;
+    const LEGACY_IDX_PROTOCOL: usize = 16;
+    const LEGACY_IDX_RULE_LABEL: usize = 3;
+
+    let interface = safe_get_field(&fields, LEGACY_IDX_INTERFACE);
+    let action = safe_get_field(&fields, LEGACY_IDX_ACTION);
+    let source_ip = safe_get_field(&fields, LEGACY_IDX_SOURCE_IP);
+    let source_port = safe_get_field(&fields, LEGACY_IDX_SOURCE_PORT).and_then(|s| s.parse().ok());
+    let dest_ip = safe_get_field(&fields, LEGACY_IDX_DEST_IP);
+    let dest_port = safe_get_field(&fields, LEGACY_IDX_DEST_PORT).and_then(|s| s.parse().ok());
+    let protocol = safe_get_field(&fields, LEGACY_IDX_PROTOCOL);
+    let rule_label = safe_get_field(&fields, LEGACY_IDX_RULE_LABEL);
 
     Ok(LogEntry {
         id: entry_id,
@@ -150,14 +205,80 @@ fn parse_with_csv_crate(line: &str, line_number: u64, entry_id: u64) -> ParseRes
         action,
         rule_label,
         raw_line: line.to_string(),
-        message: String::new(), // CSV format doesn't have a message field
+        message: String::new(),
     })
 }
 
-fn safe_get(record: &csv::StringRecord, index: usize) -> Option<String> {
-    record.get(index)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
+/// Fallback parser using csv crate (handles quoted fields)
+fn parse_with_csv_crate(line: &str, line_number: u64, entry_id: u64) -> ParseResult<LogEntry> {
+    let mut reader = ReaderBuilder::new()
+        .has_headers(false)
+        .from_reader(line.as_bytes());
+
+    let record = reader.records().next()
+        .ok_or_else(|| ParseError::MalformedCSV {
+            line: line_number,
+            reason: "Empty CSV line".to_string(),
+        })?
+        .map_err(|e| ParseError::MalformedCSV {
+            line: line_number,
+            reason: format!("CSV parsing error: {}", e),
+        })?;
+
+    if record.len() < 10 {
+        return Err(ParseError::MalformedCSV {
+            line: line_number,
+            reason: format!("Insufficient fields: expected at least 10, got {}", record.len()),
+        });
+    }
+
+    let timestamp_str = record.get(0)
+        .ok_or_else(|| ParseError::MalformedCSV {
+            line: line_number,
+            reason: "Missing timestamp field".to_string(),
+        })?;
+
+    let timestamp = parse_csv_timestamp(timestamp_str, line_number)?;
+
+    // Use new correct indices
+    fn safe_get(record: &csv::StringRecord, index: usize) -> Option<String> {
+        record.get(index)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+    }
+
+    let interface = safe_get(&record, IDX_INTERFACE);
+    let action = safe_get(&record, IDX_ACTION);
+    let source_ip = safe_get(&record, IDX_SOURCE_IP);
+    let source_port = safe_get(&record, IDX_SOURCE_PORT).and_then(|s| s.parse().ok());
+    let dest_ip = safe_get(&record, IDX_DEST_IP);
+    let dest_port = safe_get(&record, IDX_DEST_PORT).and_then(|s| s.parse().ok());
+    let protocol = safe_get(&record, IDX_PROTOCOL);
+    let rule_label = safe_get(&record, IDX_TRACKER);
+
+    Ok(LogEntry {
+        id: entry_id,
+        format: LogFormat::CSV,
+        timestamp,
+        priority: None,
+        facility: None,
+        severity: None,
+        hostname: None,
+        process_name: None,
+        process_id: None,
+        message_id: None,
+        structured_data: None,
+        interface,
+        source_ip,
+        source_port,
+        dest_ip,
+        dest_port,
+        protocol,
+        action,
+        rule_label,
+        raw_line: line.to_string(),
+        message: String::new(),
+    })
 }
 
 fn parse_csv_timestamp(timestamp_str: &str, line_number: u64) -> ParseResult<DateTime<Utc>> {
@@ -175,8 +296,10 @@ fn parse_csv_timestamp(timestamp_str: &str, line_number: u64) -> ParseResult<Dat
         return Ok(dt.with_timezone(&Utc));
     }
 
-    // Try custom OPNsense format (if different)
-    // TODO: Add additional timestamp formats if needed
+    // Try ISO without timezone
+    if let Ok(naive) = NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%dT%H:%M:%S") {
+        return Ok(naive.and_utc());
+    }
 
     Err(ParseError::MalformedCSV {
         line: line_number,
@@ -189,48 +312,86 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_valid_csv_filterlog() {
-        // CSV format with proper field indices matching IDX_ constants
-        let line = "1705329000,111,222,333,vtnet0,555,pass,inet7,192.168.1.100,443,10.0.0.5,54321,13,14,15,16,TCP,abc123";
+    fn test_parse_opnsense_native_format() {
+        // Real OPNsense syslog format with tab separators
+        let line = "2026-01-21T11:07:29\tInformational\tfilterlog\t 14,,,02f4bab031b57d1e30553ce08e0ec131,ovpns3,match,block,in,4,0x0,,128,44671,0,none,17,udp,291,10.81.248.2,10.81.248.255,54915,54915,271";
         let result = parse_csv_filterlog_entry(line, 1, 1);
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Parse failed: {:?}", result.err());
 
         let entry = result.unwrap();
-        assert_eq!(entry.interface.as_deref(), Some("vtnet0"));
+        assert_eq!(entry.interface.as_deref(), Some("ovpns3"));
+        assert_eq!(entry.action.as_deref(), Some("block"));
+        assert_eq!(entry.source_ip.as_deref(), Some("10.81.248.2"));
+        assert_eq!(entry.dest_ip.as_deref(), Some("10.81.248.255"));
+        assert_eq!(entry.source_port, Some(54915));
+        assert_eq!(entry.dest_port, Some(54915));
+        assert_eq!(entry.protocol.as_deref(), Some("udp"));
+        assert_eq!(entry.rule_label.as_deref(), Some("02f4bab031b57d1e30553ce08e0ec131"));
+    }
+
+    #[test]
+    fn test_parse_opnsense_tcp_entry() {
+        let line = "2026-01-21T11:07:29\tInformational\tfilterlog\t 42,,,066f924120669e6f9191376d128ba5ae,igc0,match,pass,out,4,0x0,,127,62184,0,DF,6,tcp,52,85.90.1.66,135.236.90.183,41851,443,0,S,3121015473,,64240,,mss;nop;wscale;nop;nop;sackOK";
+        let result = parse_csv_filterlog_entry(line, 1, 1);
+        assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+
+        let entry = result.unwrap();
+        assert_eq!(entry.interface.as_deref(), Some("igc0"));
         assert_eq!(entry.action.as_deref(), Some("pass"));
-        assert_eq!(entry.source_ip.as_deref(), Some("192.168.1.100"));
-        assert_eq!(entry.source_port, Some(443));
-        assert_eq!(entry.dest_ip.as_deref(), Some("10.0.0.5"));
-        assert_eq!(entry.dest_port, Some(54321));
-        assert_eq!(entry.protocol.as_deref(), Some("TCP"));
-        assert_eq!(entry.rule_label.as_deref(), Some("abc123"));
+        assert_eq!(entry.source_ip.as_deref(), Some("85.90.1.66"));
+        assert_eq!(entry.dest_ip.as_deref(), Some("135.236.90.183"));
+        assert_eq!(entry.source_port, Some(41851));
+        assert_eq!(entry.dest_port, Some(443));
+        assert_eq!(entry.protocol.as_deref(), Some("tcp"));
+    }
+
+    #[test]
+    fn test_parse_opnsense_with_bom() {
+        // Line with UTF-8 BOM
+        let line = "\u{FEFF}2026-01-21T11:07:29\tInformational\tfilterlog\t 14,,,hash,igc0,match,block,in,4,0x0,,128,1,0,none,17,udp,65,10.0.0.1,10.0.0.2,1234,5678,45";
+        let result = parse_csv_filterlog_entry(line, 1, 1);
+        assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+
+        let entry = result.unwrap();
+        assert_eq!(entry.interface.as_deref(), Some("igc0"));
+    }
+
+    #[test]
+    fn test_parse_different_interfaces() {
+        let test_cases = vec![
+            ("igc0", "igc0"),
+            ("igc1", "igc1"),
+            ("igc2", "igc2"),
+            ("ovpns3", "ovpns3"),
+            ("wg0", "wg0"),
+            ("enc0", "enc0"),
+        ];
+
+        for (interface, expected) in test_cases {
+            let line = format!(
+                "2026-01-21T11:07:29\tInformational\tfilterlog\t 14,,,hash,{},match,block,in,4,0x0,,128,1,0,none,17,udp,65,10.0.0.1,10.0.0.2,1234,5678,45",
+                interface
+            );
+            let result = parse_csv_filterlog_entry(&line, 1, 1);
+            assert!(result.is_ok(), "Failed for interface {}: {:?}", interface, result.err());
+            assert_eq!(result.unwrap().interface.as_deref(), Some(expected));
+        }
     }
 
     #[test]
     fn test_malformed_csv_insufficient_fields() {
-        let line = "timestamp,field1,field2";
+        let line = "2026-01-21T11:07:29\tInformational\tfilterlog\t 14,,,hash";
         let result = parse_csv_filterlog_entry(line, 1, 1);
-        // Fast path will fail with "Insufficient fields" (from csv crate fallback)
-        // or parsing error depending on the path taken
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_fast_path_vs_fallback() {
-        // Test that fast path and fallback produce same results
-        let line = "1705329000,111,222,333,vtnet0,555,pass,inet7,192.168.1.100,443,10.0.0.5,54321,13,14,15,16,TCP,abc123";
+    fn test_non_filterlog_line_fails() {
+        // Line that's not a filterlog entry
+        let line = "2026-01-21T11:07:29\tInformational\tkernel\t some kernel message";
         let result = parse_csv_filterlog_entry(line, 1, 1);
-        assert!(result.is_ok());
-
-        // Line with quotes should use fallback
-        let quoted_line = r#"1705329000,111,222,333,vtnet0,555,pass,inet7,"192.168.1.100",443,10.0.0.5,54321,13,14,15,16,TCP,abc123"#;
-        let result_quoted = parse_csv_filterlog_entry(quoted_line, 1, 1);
-        assert!(result_quoted.is_ok());
-
-        // Both should parse the IP correctly
-        let entry1 = result.unwrap();
-        let entry2 = result_quoted.unwrap();
-        assert_eq!(entry1.source_ip, entry2.source_ip);
+        // Should fail because it's not filterlog
+        assert!(result.is_err());
     }
 }
 

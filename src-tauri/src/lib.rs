@@ -92,6 +92,7 @@ pub fn run() {
             commands::storage::load_index_file,
             commands::query::execute_query,
             commands::query::get_entries_by_ids,
+            commands::query::get_bitmap_stats,
             // Story 3.1: API Connection & Credential Storage
             api_client::commands::save_api_credentials,
             api_client::commands::load_api_credentials,

@@ -116,6 +116,30 @@ impl BitmapIndex {
 
         size
     }
+
+    /// Get all unique action values with their counts (for debugging)
+    pub fn get_action_stats(&self) -> Vec<(String, u64)> {
+        self.actions
+            .iter()
+            .map(|(k, v)| (k.clone(), v.len()))
+            .collect()
+    }
+
+    /// Get all unique protocol values with their counts (for debugging)
+    pub fn get_protocol_stats(&self) -> Vec<(String, u64)> {
+        self.protocols
+            .iter()
+            .map(|(k, v)| (k.clone(), v.len()))
+            .collect()
+    }
+
+    /// Get all unique interface values with their counts (for debugging)
+    pub fn get_interface_stats(&self) -> Vec<(String, u64)> {
+        self.interfaces
+            .iter()
+            .map(|(k, v)| (k.clone(), v.len()))
+            .collect()
+    }
 }
 
 #[cfg(test)]

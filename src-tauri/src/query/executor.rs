@@ -148,12 +148,20 @@ impl QueryExecutor {
             _ => None,
         };
 
-        let bitmap = bitmap.ok_or_else(|| {
-            QueryError::ExecutionError(format!("No bitmap for {}={}", field, value_str))
-        })?;
+        // If value not found in index, return empty bitmap (0 matches) instead of error.
+        // This is correct semantics: searching for a non-existent value should return no results,
+        // not crash. Use get_bitmap_stats command to see what values are actually indexed.
+        let bitmap = bitmap.cloned().unwrap_or_else(|| {
+            log::warn!(
+                "No bitmap for {}={} - returning empty result. Use get_bitmap_stats to see indexed values.",
+                field,
+                value_str
+            );
+            RoaringBitmap::new()
+        });
 
         match filter.operator {
-            FilterOperator::Equals => Ok(bitmap.clone()),
+            FilterOperator::Equals => Ok(bitmap),
             FilterOperator::NotEquals => {
                 let all_entries =
                     (0..self.total_entries as u32).collect::<RoaringBitmap>();
@@ -363,10 +371,10 @@ mod tests {
             logic: None,
         };
 
-        // Should not error even if bitmap is empty
+        // Should return empty bitmap (0 matches) when value not found, not error
         let result = executor.execute_bitmap_filter("action", &filter);
-        // Will fail with "No bitmap" error since we have empty index
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 0);
     }
 
     #[test]

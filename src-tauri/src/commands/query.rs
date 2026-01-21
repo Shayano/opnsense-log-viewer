@@ -210,6 +210,50 @@ pub fn clear_hybrid_index() -> Result<(), String> {
     Ok(())
 }
 
+/// DTO for bitmap statistics (debugging)
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BitmapStatsDto {
+    pub actions: Vec<(String, u64)>,
+    pub protocols: Vec<(String, u64)>,
+    pub interfaces: Vec<(String, u64)>,
+    pub total_entries: usize,
+}
+
+/// Get bitmap index statistics for debugging
+///
+/// Returns all unique values indexed in the bitmap with their counts.
+/// Useful for diagnosing "No bitmap for X=Y" errors.
+#[tauri::command]
+pub async fn get_bitmap_stats() -> Result<BitmapStatsDto, String> {
+    let index_guard = HYBRID_INDEX
+        .lock()
+        .map_err(|e| format!("Failed to lock index: {}", e))?;
+
+    let hybrid_index = index_guard
+        .as_ref()
+        .ok_or_else(|| "Index not loaded. Please open a log file first.".to_string())?;
+
+    let bitmap_index = hybrid_index.bitmap_index();
+
+    let stats = BitmapStatsDto {
+        actions: bitmap_index.get_action_stats(),
+        protocols: bitmap_index.get_protocol_stats(),
+        interfaces: bitmap_index.get_interface_stats(),
+        total_entries: hybrid_index.entry_count(),
+    };
+
+    info!(
+        "Bitmap stats: {} actions, {} protocols, {} interfaces, {} total entries",
+        stats.actions.len(),
+        stats.protocols.len(),
+        stats.interfaces.len(),
+        stats.total_entries
+    );
+
+    Ok(stats)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
