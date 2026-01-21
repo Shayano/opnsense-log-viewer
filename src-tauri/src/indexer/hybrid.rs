@@ -1,12 +1,12 @@
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use sha2::{Sha256, Digest};
+// Story 1.7: Removed sha2 import - using crate::storage::calculate_file_hash instead
 
 use crate::indexer::inverted::InvertedIndex;
 use crate::indexer::bitmap::BitmapIndex;
@@ -73,23 +73,7 @@ impl HybridIndex {
         }
     }
 
-    /// Calculate SHA-256 hash of a file
-    fn calculate_file_hash<P: AsRef<Path>>(file_path: P) -> Result<String, IndexError> {
-        let mut file = std::fs::File::open(file_path)?;
-        let mut hasher = Sha256::new();
-        let mut buffer = [0; 8192];
-
-        loop {
-            let bytes_read = file.read(&mut buffer)?;
-            if bytes_read == 0 {
-                break;
-            }
-            hasher.update(&buffer[..bytes_read]);
-        }
-
-        let result = hasher.finalize();
-        Ok(format!("{:x}", result))
-    }
+    // Story 1.7: Removed duplicate calculate_file_hash - use crate::storage::calculate_file_hash instead
 
     /// Build index from a log file with progress callback
     pub fn build_index<P, F>(
@@ -105,8 +89,11 @@ impl HybridIndex {
         let file_path = file_path.as_ref();
         let file_size = std::fs::metadata(file_path)?.len();
 
-        // Calculate SHA-256 hash of source file
-        let source_hash = Self::calculate_file_hash(file_path)?;
+        // Calculate SHA-256 hash of source file using optimized storage module (256KB buffer)
+        // Story 1.7: Use unified hash implementation instead of duplicate
+        let source_hash_bytes = crate::storage::calculate_file_hash(file_path)
+            .map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        let source_hash = hex::encode(source_hash_bytes);
 
         // Build indexes by reading line-by-line to avoid loading the entire file into memory.
         let file = File::open(file_path)?;

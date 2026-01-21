@@ -88,6 +88,9 @@ export function useFileDialog() {
   /**
    * Try to load existing index, or start new indexation
    *
+   * Story 1.7: Optimized to skip full hash calculation for new files.
+   * Uses check_index_exists (fast file size heuristic) before load_index_file (full hash).
+   *
    * Tauri IPC pattern: Ok(T) returns T directly, Err(String) throws JS exception.
    * We handle different error cases by parsing the error message.
    */
@@ -103,8 +106,19 @@ export function useFileDialog() {
     });
 
     try {
-      // Try to load existing index first (Story 1.4)
-      // On success, Tauri returns IndexMetadata directly
+      // Story 1.7: Quick check if any index might exist (uses file size heuristic, NOT full hash)
+      // This avoids calculating SHA-256 of 17GB+ files for new files that have never been indexed
+      const [potentialIndexExists] = await invoke<[boolean, string | null]>('check_index_exists', { filePath });
+
+      if (!potentialIndexExists) {
+        // No index with matching file size exists - skip hash calculation entirely
+        console.log('[MEM] No potential index found - proceeding directly to indexation (skipping hash)');
+        await performIndexation(filePath);
+        return;
+      }
+
+      // Potential index exists - now do full verification (calculates hash)
+      console.log('[MEM] Potential index found - verifying with full hash calculation');
       const metadata = await invoke<IndexMetadata>('load_index_file', { filePath });
 
       // Existing index found and valid

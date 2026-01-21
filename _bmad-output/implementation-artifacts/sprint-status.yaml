@@ -85,6 +85,7 @@ development_status:
     1-4-index-persistence-reuse-with-sha256: done
     1-5-log-entry-display-table-with-virtual-scrolling: done
     1-6-entry-detail-view-with-copy-functionality: done
+    1-7-file-selection-performance-optimization: done # BUGFIX: Double hash calculation - FIXED & REVIEWED
     epic-1-retrospective: optional
     epic-2: done
     2-1-visual-filter-builder-ui: done

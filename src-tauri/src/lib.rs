@@ -88,6 +88,7 @@ pub fn run() {
             commands::indexation::cancel_indexation,
             commands::storage::list_all_indexes,
             commands::storage::delete_index_by_hash,
+            commands::storage::check_index_exists, // Story 1.7: Quick index existence check
             commands::storage::load_index_file,
             commands::query::execute_query,
             commands::query::get_entries_by_ids,
