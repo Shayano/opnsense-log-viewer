@@ -423,4 +423,95 @@ mod tests {
         let intersect_result = deserialized.intersect(vec![deserialized_block, deserialized_tcp]);
         assert!(intersect_result.len() > 0, "Intersection should have entries");
     }
+
+    /// Story 6.6 (AC1): rkyv round-trip test with 100K+ entries for BitmapIndex
+    /// Validates data integrity at scale for bitmap indexes
+    #[test]
+    fn test_bitmap_index_rkyv_roundtrip_100k() {
+        let mut index = BitmapIndex::new();
+
+        // Add 100,000 entries with diverse action/protocol/interface distribution
+        for i in 0..100_000u64 {
+            let action = match i % 5 {
+                0 => "block",
+                1 => "pass",
+                2 => "reject",
+                3 => "nat",
+                _ => "rdr",
+            };
+            let protocol = match i % 4 {
+                0 => "TCP",
+                1 => "UDP",
+                2 => "ICMP",
+                _ => "GRE",
+            };
+            let interface = format!("vtnet{}", i % 8);
+            index.add_entry(i, Some(action), Some(protocol), Some(&interface));
+        }
+
+        // Convert to rkyv-serializable format and serialize
+        let rkyv_format = index.to_rkyv();
+        let bytes = rkyv::to_bytes::<_, 256>(&rkyv_format).expect("rkyv serialization failed");
+
+        // Verify serialized data (RoaringBitmap compresses 100K entries efficiently)
+        assert!(bytes.len() > 1_000, "Expected significant serialized data for 100K entries");
+        assert!(bytes.len() < 5_000_000, "Serialized bitmap data should be compact");
+
+        // Validate archived data
+        let archived = rkyv::check_archived_root::<BitmapIndexRkyv>(&bytes)
+            .expect("rkyv validation failed");
+
+        // Verify archived vecs have entries
+        assert_eq!(archived.actions.len(), 5, "Expected 5 action types");
+        assert_eq!(archived.protocols.len(), 4, "Expected 4 protocol types");
+        assert_eq!(archived.interfaces.len(), 8, "Expected 8 interface types");
+
+        // Convert from archived format back to BitmapIndex
+        let deserialized = BitmapIndex::from_archived_rkyv(archived);
+
+        // Verify roundtrip preserves bitmap data for all action types
+        for action in ["block", "pass", "reject", "nat", "rdr"] {
+            let original = index.query_action(action).unwrap();
+            let loaded = deserialized.query_action(action).unwrap();
+            assert_eq!(
+                original.len(), loaded.len(),
+                "Action '{}' bitmap length mismatch: {} vs {}",
+                action, original.len(), loaded.len()
+            );
+        }
+
+        // Verify protocol bitmaps
+        for protocol in ["TCP", "UDP", "ICMP", "GRE"] {
+            let original = index.query_protocol(protocol).unwrap();
+            let loaded = deserialized.query_protocol(protocol).unwrap();
+            assert_eq!(
+                original.len(), loaded.len(),
+                "Protocol '{}' bitmap length mismatch", protocol
+            );
+        }
+
+        // Verify interface bitmaps
+        for i in 0..8 {
+            let interface = format!("vtnet{}", i);
+            let original = index.query_interface(&interface).unwrap();
+            let loaded = deserialized.query_interface(&interface).unwrap();
+            assert_eq!(
+                original.len(), loaded.len(),
+                "Interface '{}' bitmap length mismatch", interface
+            );
+        }
+
+        // Verify expected counts (100K entries distributed across 5 actions)
+        let block_count = deserialized.query_action("block").unwrap().len();
+        assert_eq!(block_count, 20_000, "Expected 20K block entries (100K / 5 actions)");
+
+        // Verify bitmap operations work on deserialized data
+        let block_bitmap = deserialized.query_action("block").unwrap();
+        let tcp_bitmap = deserialized.query_protocol("TCP").unwrap();
+        let intersect_result = deserialized.intersect(vec![block_bitmap, tcp_bitmap]);
+        // block entries: 0, 5, 10, 15... (every 5th)
+        // TCP entries: 0, 4, 8, 12... (every 4th)
+        // Intersection: 0, 20, 40... (every 20th) = 5000 entries
+        assert_eq!(intersect_result.len(), 5_000, "Intersection count mismatch");
+    }
 }

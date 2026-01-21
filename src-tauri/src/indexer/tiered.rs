@@ -1157,4 +1157,142 @@ mod tests {
         let results = executor.query_action("block").unwrap();
         assert_eq!(results.len(), 100); // 100 total "block" entries
     }
+
+    /// Story 6.6 (AC1): rkyv round-trip test for TieredIndex via HotIndexRkyv
+    /// Validates composite index serialization at scale
+    #[test]
+    fn test_tiered_index_rkyv_roundtrip() {
+        // Create test indexes with 50K entries
+        let (inverted, bitmap, offsets) = create_test_indexes(50_000);
+
+        // Create TieredIndex with all entries in hot tier (no warm tiers for this test)
+        let config = TieredConfig::with_hot_entries(100_000); // Large enough to keep all in hot
+        let tiered = TieredIndex::from_hybrid(
+            inverted.clone(),
+            bitmap.clone(),
+            offsets.clone(),
+            50_000,
+            config,
+        ).unwrap();
+
+        // Verify initial state
+        assert!(tiered.warm.is_empty(), "All entries should be in hot tier");
+        assert_eq!(tiered.total_entries, 50_000);
+        assert_eq!(tiered.hot.entry_count, 50_000);
+
+        // Convert HotIndex to HotIndexRkyv and serialize
+        let hot_rkyv = HotIndexRkyv::from_hot_index(&tiered.hot);
+        let bytes = rkyv::to_bytes::<_, 256>(&hot_rkyv)
+            .expect("HotIndexRkyv serialization failed");
+
+        // Verify serialized data size is reasonable
+        assert!(bytes.len() > 1_000_000, "Expected significant serialized data for 50K entries");
+        assert!(bytes.len() < 100_000_000, "Serialized data should not be excessive");
+
+        // Validate and deserialize
+        let archived = rkyv::check_archived_root::<HotIndexRkyv>(&bytes)
+            .expect("rkyv validation failed");
+
+        // Convert back to HotIndex from archived form
+        let loaded_hot = archived.to_hot_index();
+
+        // Verify entry range and count preserved
+        assert_eq!(loaded_hot.entry_range, tiered.hot.entry_range, "Entry range mismatch");
+        assert_eq!(loaded_hot.entry_count, tiered.hot.entry_count, "Entry count mismatch");
+
+        // Verify inverted index data preserved
+        let original_ip_result = tiered.hot.query_source_ip("192.168.1.0");
+        let loaded_ip_result = loaded_hot.query_source_ip("192.168.1.0");
+        assert_eq!(original_ip_result.is_some(), loaded_ip_result.is_some());
+        if let (Some(orig), Some(loaded)) = (original_ip_result, loaded_ip_result) {
+            assert_eq!(orig.len(), loaded.len(), "Source IP query result mismatch");
+        }
+
+        // Verify bitmap index data preserved
+        let original_block = tiered.hot.query_action("block");
+        let loaded_block = loaded_hot.query_action("block");
+        assert_eq!(original_block.is_some(), loaded_block.is_some());
+        if let (Some(orig), Some(loaded)) = (original_block, loaded_block) {
+            assert_eq!(orig.len(), loaded.len(), "Action bitmap length mismatch");
+        }
+
+        // Verify offset table preserved
+        assert_eq!(
+            tiered.hot.get_offset(0),
+            loaded_hot.get_offset(0),
+            "First offset mismatch"
+        );
+        assert_eq!(
+            tiered.hot.get_offset(25_000),
+            loaded_hot.get_offset(25_000),
+            "Middle offset mismatch"
+        );
+        assert_eq!(
+            tiered.hot.get_offset(49_999),
+            loaded_hot.get_offset(49_999),
+            "Last offset mismatch"
+        );
+
+        // Verify query operations work on loaded index
+        let loaded_pass = loaded_hot.query_action("pass").unwrap();
+        assert_eq!(loaded_pass.len(), 25_000, "Expected 25K pass entries (half of 50K)");
+
+        let loaded_tcp = loaded_hot.query_protocol("TCP").unwrap();
+        assert_eq!(loaded_tcp.len(), 50_000, "Expected all 50K entries to have TCP");
+    }
+
+    /// Story 6.6: Test HotIndexRkyv roundtrip with larger dataset (simulating warm tier reference)
+    #[test]
+    fn test_hot_index_rkyv_roundtrip_with_entry_range() {
+        // Create indexes with specific entry range (simulating a portion of larger dataset)
+        let mut inverted = InvertedIndex::new();
+        let mut bitmap = BitmapIndex::new();
+        let mut offsets = OffsetTable::new();
+
+        // Simulate entries 10_000 to 60_000 (50K entries with offset start)
+        let start_id = 10_000u64;
+        let end_id = 60_000u64;
+        for i in start_id..end_id {
+            let ip = format!("192.168.{}.{}", (i / 256) % 256, i % 256);
+            inverted.add_entry(i, Some(&ip), Some("10.0.0.1"), Some(443), Some(80));
+            bitmap.add_entry(
+                i,
+                Some(if i % 3 == 0 { "block" } else { "pass" }),
+                Some("UDP"),
+                Some("vtnet1"),
+            );
+            offsets.add_offset(i, i * 150);
+        }
+
+        // Create HotIndex with specific range
+        let hot = HotIndex::from_indexes(inverted, bitmap, offsets, start_id, end_id);
+
+        // Verify range contains
+        assert!(hot.contains(start_id));
+        assert!(hot.contains(end_id - 1));
+        assert!(!hot.contains(start_id - 1));
+        assert!(!hot.contains(end_id));
+
+        // Serialize via HotIndexRkyv
+        let hot_rkyv = HotIndexRkyv::from_hot_index(&hot);
+        let bytes = rkyv::to_bytes::<_, 256>(&hot_rkyv).expect("Serialization failed");
+
+        // Deserialize
+        let archived = rkyv::check_archived_root::<HotIndexRkyv>(&bytes).expect("Validation failed");
+        let loaded = archived.to_hot_index();
+
+        // Verify entry range preserved correctly
+        assert_eq!(loaded.entry_range, (start_id, end_id));
+        assert_eq!(loaded.entry_count, end_id - start_id);
+
+        // Verify contains behavior preserved
+        assert!(loaded.contains(start_id));
+        assert!(loaded.contains(end_id - 1));
+        assert!(!loaded.contains(start_id - 1));
+        assert!(!loaded.contains(end_id));
+
+        // Verify offset at boundaries
+        assert_eq!(loaded.get_offset(start_id), Some(start_id * 150));
+        assert_eq!(loaded.get_offset(end_id - 1), Some((end_id - 1) * 150));
+    }
 }
