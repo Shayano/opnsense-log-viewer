@@ -304,21 +304,26 @@ pub async fn build_hybrid_index(
         *guard = Some(hybrid_index);
     }
 
-    // 5. Build index with progress callback
+    // 5. Build index with progress callback in blocking task
+    // Performance: Use spawn_blocking to avoid blocking the async runtime
+    // This allows the UI to remain responsive during large file indexation
     let app_clone = app.clone();
-    let result = {
-        let mut guard = HYBRID_INDEX.lock().unwrap();
+    let canonical_path_clone = canonical_path.clone();
+    let hybrid_index_arc = HYBRID_INDEX.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        let mut guard = hybrid_index_arc.lock().unwrap();
         let index = guard.as_mut().unwrap();
 
         index.build_index(
-            &canonical_path,
+            &canonical_path_clone,
             detected_format,
             move |progress: IndexProgress| {
                 // Emit progress event to frontend
                 let _ = app_clone.emit("indexation-progress", &progress);
             }
         )
-    };
+    }).await.map_err(|e| format!("Build task failed: {}", e))?;
 
     match result {
         Ok(metadata) => {

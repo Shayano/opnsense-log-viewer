@@ -12,8 +12,13 @@ use crate::indexer::inverted::InvertedIndex;
 use crate::indexer::bitmap::BitmapIndex;
 use crate::indexer::offset_table::OffsetTable;
 use crate::indexer::progress::IndexProgress;
+use crate::indexer::parallel::build_index_parallel;
 use crate::parser::{csv_filterlog, rfc3164, rfc5424};
 use crate::types::log_entry::LogFormat;
+
+/// Threshold for switching to parallel indexing (100 MB)
+/// Files larger than this will use multi-threaded processing
+const PARALLEL_THRESHOLD: u64 = 100 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,11 +81,15 @@ impl HybridIndex {
     // Story 1.7: Removed duplicate calculate_file_hash - use crate::storage::calculate_file_hash instead
 
     /// Build index from a log file with progress callback
+    ///
+    /// Automatically selects between sequential and parallel indexing based on file size:
+    /// - Files > 100 MB: Use parallel multi-threaded processing (rayon + mmap)
+    /// - Smaller files: Use sequential processing (lower overhead)
     pub fn build_index<P, F>(
         &mut self,
         file_path: P,
         format: LogFormat,
-        mut progress_callback: F,
+        progress_callback: F,
     ) -> Result<IndexMetadata, IndexError>
     where
         P: AsRef<Path>,
@@ -95,9 +104,80 @@ impl HybridIndex {
             .map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
         let source_hash = hex::encode(source_hash_bytes);
 
+        // Choose indexing strategy based on file size
+        if file_size > PARALLEL_THRESHOLD {
+            log::info!(
+                "[PERF] File size {} MB > threshold {} MB, using PARALLEL indexing",
+                file_size / (1024 * 1024),
+                PARALLEL_THRESHOLD / (1024 * 1024)
+            );
+            self.build_index_parallel(file_path, format, file_size, source_hash, progress_callback)
+        } else {
+            log::info!(
+                "[PERF] File size {} MB <= threshold {} MB, using SEQUENTIAL indexing",
+                file_size / (1024 * 1024),
+                PARALLEL_THRESHOLD / (1024 * 1024)
+            );
+            self.build_index_sequential(file_path, format, file_size, source_hash, progress_callback)
+        }
+    }
+
+    /// Build index using parallel multi-threaded processing
+    fn build_index_parallel<P, F>(
+        &mut self,
+        file_path: P,
+        format: LogFormat,
+        file_size: u64,
+        source_hash: String,
+        progress_callback: F,
+    ) -> Result<IndexMetadata, IndexError>
+    where
+        P: AsRef<Path>,
+        F: FnMut(IndexProgress),
+    {
+        let (inverted, bitmap, offset_table, metadata) = build_index_parallel(
+            file_path,
+            format,
+            file_size,
+            source_hash,
+            self.cancellation_token.clone(),
+            progress_callback,
+        )?;
+
+        self.inverted_index = inverted;
+        self.bitmap_index = bitmap;
+        self.offset_table = offset_table;
+        self.metadata = Some(metadata.clone());
+
+        log::info!(
+            "[MEM] HybridIndex::build_index_parallel: done entry_count={} memory_usage≈{} bytes",
+            metadata.entry_count,
+            self.memory_usage()
+        );
+
+        Ok(metadata)
+    }
+
+    /// Build index using sequential single-threaded processing
+    fn build_index_sequential<P, F>(
+        &mut self,
+        file_path: P,
+        format: LogFormat,
+        file_size: u64,
+        source_hash: String,
+        mut progress_callback: F,
+    ) -> Result<IndexMetadata, IndexError>
+    where
+        P: AsRef<Path>,
+        F: FnMut(IndexProgress),
+    {
+        let file_path = file_path.as_ref();
+
         // Build indexes by reading line-by-line to avoid loading the entire file into memory.
+        // Performance optimization: Use 256KB buffer instead of default 8KB
+        // This reduces syscalls by 32x on large files (e.g., 17GB: 65K vs 2M syscalls)
         let file = File::open(file_path)?;
-        let reader = BufReader::new(file);
+        let reader = BufReader::with_capacity(256 * 1024, file);
 
         let mut line_number = 0u64;
         let mut entry_id = 0u64;
@@ -160,7 +240,9 @@ impl HybridIndex {
                     entry_id += 1;
 
                     let now = std::time::Instant::now();
-                    if now.duration_since(last_progress_time).as_millis() >= 500 {
+                    // Performance: Reduce progress event frequency (2s instead of 500ms)
+                    // to minimize IPC overhead on large files
+                    if now.duration_since(last_progress_time).as_millis() >= 2000 {
                         let elapsed = start_time.elapsed().as_secs_f64();
                         progress_callback(IndexProgress::new(bytes_processed, file_size, elapsed));
                         last_progress_time = now;
@@ -194,7 +276,7 @@ impl HybridIndex {
         self.metadata = Some(metadata.clone());
 
         log::info!(
-            "[MEM] HybridIndex::build_index: done entry_count={} memory_usage≈{} bytes (streaming, no full Vec<LogEntry>)",
+            "[MEM] HybridIndex::build_index_sequential: done entry_count={} memory_usage≈{} bytes",
             total_entries,
             self.memory_usage()
         );
