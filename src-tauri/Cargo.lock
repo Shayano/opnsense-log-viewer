@@ -3052,6 +3052,7 @@ dependencies = [
  "bytecheck",
  "chrono",
  "criterion",
+ "crossbeam-channel",
  "csv",
  "dirs 5.0.1",
  "env_logger",

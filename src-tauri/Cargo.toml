@@ -73,6 +73,11 @@ bytecheck = { version = "0.6.12" }  # Must match rkyv's bytecheck version
 # - functions: Enables custom SQL functions (needed for Story 6.4 REGEXP support)
 rusqlite = { version = "0.32", features = ["bundled", "backup", "functions"] }
 
+# Story 6.2: Bounded channels for parallel parsing pipeline
+# - Provides backpressure when writer is slower than parsers
+# - Prevents memory explosion with bounded(50_000) capacity
+crossbeam-channel = "0.5"
+
 [features]
 default = ["mimalloc-allocator"]
 mimalloc-allocator = ["dep:mimalloc"]
