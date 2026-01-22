@@ -2980,6 +2980,7 @@ dependencies = [
  "mimalloc",
  "peak_alloc",
  "proptest",
+ "rand 0.8.5",
  "rayon",
  "regex",
  "reqwest",

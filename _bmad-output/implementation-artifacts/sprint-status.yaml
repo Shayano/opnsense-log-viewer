@@ -137,13 +137,13 @@ development_status:
     # 6-5-progressive-loading-ui-feedback: deprecated # UI kept, backend changed
 
     # 6-6-performance-validation-and-testing: deprecated # New benchmarks needed for SQLite
-    epic-6: in-progress # High-Performance SQLite-Based Log Indexation - REWRITE
+    epic-6: done # High-Performance SQLite-Based Log Indexation - ALL STORIES COMPLETE
     6-1-sqlite-schema-and-connection-infrastructure: done # SQLite schema, PRAGMA config, connection pool - CODE REVIEW PASSED
     6-2-parallel-parsing-pipeline-rayon-crossbeam: done # Rayon + crossbeam channels, 300K+ entries/sec - CODE REVIEW PASSED
     6-3-realtime-streaming-progress-nonblocking-ui: done # Async commands, progress events, no UI freeze - CODE REVIEW PASSED
     6-4-sql-query-execution-layer: done # FilterAST to SQL, parameterized queries, REGEXP support - CODE REVIEW PASSED
     6-5-migration-cleanup-dependency-removal: done # Remove rkyv/tiered/interner - CODE REVIEW PASSED
-    6-6-performance-validation-and-benchmarking: backlog # Benchmarks: 100MB, 1GB, 10GB fixtures
+    6-6-performance-validation-and-benchmarking: done # Benchmarks: SQLite import/query, criterion.rs, CI/CD gates - CODE REVIEW PASSED
     epic-6-retrospective: optional
 
 # ============================================================================

@@ -1,611 +1,634 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use opnsense_log_viewer_lib::indexer::{HybridIndex, IndexCache, TieredIndex, TieredConfig, HotIndex};
-use opnsense_log_viewer_lib::indexer::inverted::InvertedIndex;
-use opnsense_log_viewer_lib::indexer::bitmap::BitmapIndex;
-use opnsense_log_viewer_lib::indexer::offset_table::OffsetTable;
-use opnsense_log_viewer_lib::types::log_entry::LogFormat;
-use rkyv::Deserialize as RkyvDeserialize; // For deserialize method
+//! SQLite-Based Log Indexation Benchmarks
+//!
+//! Story 6.6: Performance validation benchmarks for SQLite log indexation pipeline.
+//!
+//! ## Benchmark Groups
+//!
+//! - `sqlite_import`: Import speed benchmarks (10K, 100K, 1M entries)
+//! - `sqlite_query`: Query benchmarks (simple, complex, regex, count)
+//! - `file_hash`: Quick file hash calculation benchmarks
+//!
+//! ## Performance Targets
+//!
+//! - Import speed: ≥200K entries/sec (target 300K+)
+//! - Simple filter: <200ms
+//! - Complex filter (5+ fields): <500ms
+//! - Regex filter: <750ms
+//! - Count query: <100ms
+//! - Memory peak: <1GB
+//!
+//! ## Usage
+//!
+//! ```bash
+//! # Run all benchmarks
+//! cargo bench --bench indexation_benchmarks
+//!
+//! # Run specific benchmark group
+//! cargo bench --bench indexation_benchmarks -- sqlite_import
+//!
+//! # View HTML reports
+//! open target/criterion/report/index.html
+//! ```
+
+use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
 use std::fs::File;
 use std::io::Write;
+use std::path::Path;
+use std::sync::Arc;
 use tempfile::TempDir;
+use rand::{SeedableRng, Rng, seq::SliceRandom};
+use rand::rngs::StdRng;
 
-fn generate_test_log_file(entry_count: usize) -> (TempDir, String) {
+// Import SQLite pipeline components
+use opnsense_log_viewer_lib::indexer::sqlite::{
+    SqliteConnectionPool, build_sqlite_index,
+};
+use opnsense_log_viewer_lib::types::log_entry::LogFormat;
+
+// Import query components
+use opnsense_log_viewer_lib::query::sqlite_executor::SqliteQueryExecutor;
+use opnsense_log_viewer_lib::query::types::{FilterCondition, FilterField, FilterOperator, FilterValue, LogicOperator};
+
+// Import file hash function
+use opnsense_log_viewer_lib::storage::integrity::calculate_file_hash_quick;
+
+// =============================================================================
+// FIXTURE GENERATOR (AC1: Deterministic log generation)
+// =============================================================================
+
+/// Generate a deterministic test log file with RFC3164-style OPNsense filterlog entries.
+///
+/// Uses seeded RNG for reproducible benchmarks across runs.
+///
+/// # Arguments
+/// * `entry_count` - Number of log entries to generate
+/// * `seed` - RNG seed for deterministic output
+///
+/// # Returns
+/// * `(TempDir, String, u64)` - Temp directory, file path, and file size in bytes
+#[allow(dead_code)] // Reserved for RFC3164 format benchmarks (currently using CSV for reliability)
+fn generate_test_log_file(entry_count: usize, seed: u64) -> (TempDir, String, u64) {
     let temp_dir = TempDir::new().unwrap();
     let file_path = temp_dir.path().join("test.log");
     let mut file = File::create(&file_path).unwrap();
 
-    // Generate RFC3164 entries
-    for i in 0..entry_count {
-        let day = (i % 28) + 1;
-        let hour = i % 24;
-        let minute = i % 60;
-        let second = i % 60;
-        let source_ip = format!("192.168.{}.{}", (i / 256) % 256, i % 256);
-        let dest_ip = format!("10.0.{}.{}", (i / 256) % 256, i % 256);
-        let source_port = 1024 + (i % 64000);
-        let dest_port = 80 + (i % 20);
-        let action = if i % 3 == 0 { "block" } else { "pass" };
-        let protocol = if i % 2 == 0 { "TCP" } else { "UDP" };
+    let mut rng = StdRng::seed_from_u64(seed);
 
+    // Realistic OPNsense filterlog patterns
+    let actions = ["pass", "block"];
+    let protocols = ["TCP", "UDP", "ICMP", "GRE"];
+    let interfaces = ["vtnet0", "vtnet1", "igb0", "em0", "lo0"];
+    let directions = ["in", "out"];
+
+    for i in 0..entry_count {
+        // Generate realistic timestamp
+        let day = (i % 28) + 1;
+        let hour = rng.gen_range(0..24);
+        let minute = rng.gen_range(0..60);
+        let second = rng.gen_range(0..60);
+
+        // Generate realistic IPs
+        let src_ip = format!(
+            "{}.{}.{}.{}",
+            rng.gen_range(1..255),
+            rng.gen_range(0..256),
+            rng.gen_range(0..256),
+            rng.gen_range(1..255)
+        );
+        let dst_ip = format!(
+            "{}.{}.{}.{}",
+            rng.gen_range(1..255),
+            rng.gen_range(0..256),
+            rng.gen_range(0..256),
+            rng.gen_range(1..255)
+        );
+
+        // Generate realistic ports
+        let src_port = rng.gen_range(1024..65535);
+        let dst_port = if rng.gen_bool(0.3) {
+            // Common ports 30% of the time
+            *[22, 80, 443, 8080, 3389].choose(&mut rng).unwrap()
+        } else {
+            rng.gen_range(1..65535)
+        };
+
+        let action = actions[rng.gen_range(0..actions.len())];
+        let protocol = protocols[rng.gen_range(0..protocols.len())];
+        let interface = interfaces[rng.gen_range(0..interfaces.len())];
+        let direction = directions[rng.gen_range(0..directions.len())];
+        let rule_id = format!("rule_{}", rng.gen_range(1..100));
+
+        // RFC3164 format with filterlog-style data
         writeln!(
             file,
-            "<134>Jan {} {:02}:{:02}:{:02} firewall filterlog[123]: {} {} {} {} {} {}",
-            day, hour, minute, second, action, protocol, source_ip, dest_ip, source_port, dest_port
+            "<134>Jan {} {:02}:{:02}:{:02} firewall filterlog[{}]: {},{},{},{},{},{},{},{},{},{}",
+            day, hour, minute, second,
+            rng.gen_range(1000..9999),
+            rule_id,
+            interface,
+            action,
+            direction,
+            protocol,
+            src_ip,
+            src_port,
+            dst_ip,
+            dst_port,
+            rng.gen_range(40..1500) // packet length
         ).unwrap();
     }
 
-    (temp_dir, file_path.to_string_lossy().to_string())
+    file.flush().unwrap();
+    let file_size = std::fs::metadata(&file_path).unwrap().len();
+
+    (temp_dir, file_path.to_string_lossy().to_string(), file_size)
 }
 
-fn benchmark_indexation_small(c: &mut Criterion) {
-    let mut group = c.benchmark_group("indexation");
+/// Generate a CSV log file for reliable parsing benchmarks
+fn generate_csv_log_file(entry_count: usize, seed: u64) -> (TempDir, String, u64) {
+    let temp_dir = TempDir::new().unwrap();
+    let file_path = temp_dir.path().join("test.log");
+    let mut file = File::create(&file_path).unwrap();
 
-    // Benchmark 1000 entries (~100KB)
-    group.bench_function(BenchmarkId::new("index", "1000_entries"), |b| {
+    let mut rng = StdRng::seed_from_u64(seed);
+
+    let actions = ["pass", "block"];
+    let protocols = ["TCP", "UDP", "ICMP"];
+    let interfaces = ["vtnet0", "vtnet1", "igb0"];
+
+    // CSV header - matches OPNsense filterlog CSV export format
+    // Using a simplified header that matches what the parser expects
+    writeln!(
+        file,
+        "rulenr,interface,reason,act,dir,ipversion,proto,src,srcport,dst,dstport,timestamp"
+    ).unwrap();
+
+    for i in 0..entry_count {
+        let day = (i % 28) + 1;
+        let hour = rng.gen_range(0..24);
+        let minute = rng.gen_range(0..60);
+        let second = rng.gen_range(0..60);
+
+        let src_ip = format!(
+            "{}.{}.{}.{}",
+            rng.gen_range(1..255),
+            rng.gen_range(0..256),
+            rng.gen_range(0..256),
+            rng.gen_range(1..255)
+        );
+        let dst_ip = format!(
+            "{}.{}.{}.{}",
+            rng.gen_range(1..255),
+            rng.gen_range(0..256),
+            rng.gen_range(0..256),
+            rng.gen_range(1..255)
+        );
+
+        let src_port = rng.gen_range(1024..65535);
+        let dst_port = rng.gen_range(1..65535);
+
+        let action = actions[rng.gen_range(0..actions.len())];
+        let protocol = protocols[rng.gen_range(0..protocols.len())];
+        let interface = interfaces[rng.gen_range(0..interfaces.len())];
+        let rule_id = rng.gen_range(1..100);
+
+        writeln!(
+            file,
+            "{},{},match,{},in,4,{},{},{},{},{},2026-01-{:02} {:02}:{:02}:{:02}",
+            rule_id,
+            interface,
+            action,
+            protocol,
+            src_ip,
+            src_port,
+            dst_ip,
+            dst_port,
+            day,
+            hour,
+            minute,
+            second
+        ).unwrap();
+    }
+
+    file.flush().unwrap();
+    let file_size = std::fs::metadata(&file_path).unwrap().len();
+
+    (temp_dir, file_path.to_string_lossy().to_string(), file_size)
+}
+
+// =============================================================================
+// SQLITE IMPORT BENCHMARKS (AC2: Import speed benchmarks)
+// =============================================================================
+
+/// Benchmark SQLite import performance at various scales.
+///
+/// Tests:
+/// - 10K entries (~1MB) - Small file baseline
+/// - 100K entries (~10MB) - Medium file
+/// - 1M entries (~100MB) - Large file target
+///
+/// Metrics tracked:
+/// - Entries per second
+/// - Bytes per second throughput
+fn benchmark_sqlite_import(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sqlite_import");
+
+    // Test sizes: 10K, 100K, 1M entries
+    let test_sizes = [
+        (10_000, "10k_entries"),
+        (100_000, "100k_entries"),
+    ];
+
+    for (entry_count, label) in test_sizes.iter() {
+        // Generate test file once per test size (deterministic seed)
+        let (temp_dir, file_path, file_size) = generate_csv_log_file(*entry_count, 42);
+        let db_dir = TempDir::new().unwrap();
+
+        // Set throughput for entries/sec calculation
+        group.throughput(Throughput::Elements(*entry_count as u64));
+
+        if *entry_count >= 100_000 {
+            group.sample_size(10);
+        }
+
+        group.bench_function(BenchmarkId::new("import", label), |b| {
+            let mut iteration = 0u64;
+            b.iter(|| {
+                // Each iteration needs a fresh database
+                let db_path = db_dir.path().join(format!("bench_{}.sqlite", iteration));
+                iteration += 1;
+
+                let pool = SqliteConnectionPool::new(&db_path, 4).unwrap();
+                let stats = build_sqlite_index(
+                    &pool,
+                    Path::new(&file_path),
+                    LogFormat::CSV,
+                    &format!("bench_hash_{}", iteration),
+                    file_size,
+                ).unwrap();
+
+                black_box(stats)
+            });
+        });
+
+        // Cleanup temp dir is dropped automatically
+        drop(temp_dir);
+    }
+
+    group.finish();
+}
+
+/// Benchmark large-scale SQLite import (1M entries).
+///
+/// Separate from main import benchmark due to longer runtime.
+/// Sample size reduced to 10 for reasonable CI time.
+fn benchmark_sqlite_import_large(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sqlite_import_large");
+    group.sample_size(10);
+
+    let entry_count = 1_000_000;
+    let (temp_dir, file_path, file_size) = generate_csv_log_file(entry_count, 42);
+    let db_dir = TempDir::new().unwrap();
+
+    group.throughput(Throughput::Elements(entry_count as u64));
+
+    group.bench_function(BenchmarkId::new("import", "1m_entries"), |b| {
+        let mut iteration = 0u64;
         b.iter(|| {
-            let (_temp_dir, file_path) = generate_test_log_file(1000);
-            let mut index = HybridIndex::new();
-            index.build_index(
-                black_box(&file_path),
-                LogFormat::RFC3164,
-                |_| {},
+            let db_path = db_dir.path().join(format!("bench_1m_{}.sqlite", iteration));
+            iteration += 1;
+
+            let pool = SqliteConnectionPool::new(&db_path, 4).unwrap();
+            let stats = build_sqlite_index(
+                &pool,
+                Path::new(&file_path),
+                LogFormat::CSV,
+                &format!("bench_hash_1m_{}", iteration),
+                file_size,
             ).unwrap();
+
+            // Log performance metrics
+            eprintln!(
+                "\n[1M IMPORT] {} entries in {}ms = {} entries/sec",
+                stats.entry_count,
+                stats.elapsed_ms,
+                stats.entries_per_second
+            );
+
+            black_box(stats)
+        });
+    });
+
+    drop(temp_dir);
+    group.finish();
+}
+
+// =============================================================================
+// SQLITE QUERY BENCHMARKS (AC3: Query performance tests)
+// =============================================================================
+
+/// Create a populated test database for query benchmarks.
+///
+/// Returns pool with 100K entries already indexed.
+fn create_populated_database(entry_count: usize) -> (TempDir, Arc<SqliteConnectionPool>) {
+    let db_dir = TempDir::new().unwrap();
+    let db_path = db_dir.path().join("query_bench.sqlite");
+    let pool = Arc::new(SqliteConnectionPool::new(&db_path, 4).unwrap());
+
+    // Generate and import test data
+    let (log_temp, log_path, file_size) = generate_csv_log_file(entry_count, 42);
+
+    build_sqlite_index(
+        &pool,
+        Path::new(&log_path),
+        LogFormat::CSV,
+        "query_bench_hash",
+        file_size,
+    ).unwrap();
+
+    drop(log_temp); // Clean up log file
+
+    (db_dir, pool)
+}
+
+/// Benchmark SQLite query performance.
+///
+/// Tests against 100K entry database:
+/// - Simple filter (single field = value): <200ms target
+/// - Complex filter (5+ fields with AND/OR): <500ms target
+/// - Regex filter: <750ms target
+/// - Count query: <100ms target
+fn benchmark_sqlite_query(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sqlite_query");
+
+    // Create populated database (100K entries)
+    let (_db_temp, pool) = create_populated_database(100_000);
+    let executor = SqliteQueryExecutor::new(pool);
+
+    // Simple filter: action = "block"
+    group.bench_function("simple_filter", |b| {
+        let filters = vec![FilterCondition {
+            field: FilterField::Action,
+            operator: FilterOperator::Equals,
+            value: FilterValue::String("block".to_string()),
+            logic: None,
+        }];
+
+        b.iter(|| {
+            executor.query(black_box(&filters), 1000, 0).unwrap()
+        });
+    });
+
+    // Complex filter: 5 conditions with AND/OR
+    group.bench_function("complex_filter_5_conditions", |b| {
+        let filters = vec![
+            FilterCondition {
+                field: FilterField::Action,
+                operator: FilterOperator::Equals,
+                value: FilterValue::String("block".to_string()),
+                logic: Some(LogicOperator::And),
+            },
+            FilterCondition {
+                field: FilterField::Protocol,
+                operator: FilterOperator::Equals,
+                value: FilterValue::String("TCP".to_string()),
+                logic: Some(LogicOperator::And),
+            },
+            FilterCondition {
+                field: FilterField::SourcePort,
+                operator: FilterOperator::GreaterThan,
+                value: FilterValue::Number(1024),
+                logic: Some(LogicOperator::And),
+            },
+            FilterCondition {
+                field: FilterField::DestinationPort,
+                operator: FilterOperator::Equals,
+                value: FilterValue::Number(443),
+                logic: Some(LogicOperator::Or),
+            },
+            FilterCondition {
+                field: FilterField::Interface,
+                operator: FilterOperator::Contains,
+                value: FilterValue::String("vtnet".to_string()),
+                logic: None,
+            },
+        ];
+
+        b.iter(|| {
+            executor.query(black_box(&filters), 1000, 0).unwrap()
+        });
+    });
+
+    // Regex filter: IP pattern matching
+    // Pattern matches any IP with 2-digit first octet (10-99), which our generator produces
+    group.bench_function("regex_filter", |b| {
+        let filters = vec![FilterCondition {
+            field: FilterField::SourceIp,
+            operator: FilterOperator::Regex,
+            value: FilterValue::String(r"^\d{2}\.\d+\.\d+\.\d+".to_string()),
+            logic: None,
+        }];
+
+        b.iter(|| {
+            executor.query(black_box(&filters), 1000, 0).unwrap()
+        });
+    });
+
+    // Count query (no filter, total entries)
+    group.bench_function("count_total", |b| {
+        b.iter(|| {
+            executor.total_entries().unwrap()
+        });
+    });
+
+    // Count with filter
+    group.bench_function("count_with_filter", |b| {
+        let filters = vec![FilterCondition {
+            field: FilterField::Action,
+            operator: FilterOperator::Equals,
+            value: FilterValue::String("pass".to_string()),
+            logic: None,
+        }];
+
+        b.iter(|| {
+            executor.count(black_box(&filters)).unwrap()
+        });
+    });
+
+    // Batch entry fetch by IDs
+    group.bench_function("fetch_entries_by_id_batch", |b| {
+        // Get some entry IDs first
+        let ids: Vec<u64> = (1..=100).collect();
+
+        b.iter(|| {
+            executor.get_entries_by_ids(black_box(&ids)).unwrap()
         });
     });
 
     group.finish();
 }
 
-fn benchmark_indexation_medium(c: &mut Criterion) {
-    let mut group = c.benchmark_group("indexation");
+/// Benchmark query performance at 1M entry scale.
+fn benchmark_sqlite_query_large(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sqlite_query_large");
+    group.sample_size(10);
 
-    // Benchmark 10000 entries (~1MB)
-    group.bench_function(BenchmarkId::new("index", "10000_entries"), |b| {
+    // Create 1M entry database
+    let (_db_temp, pool) = create_populated_database(1_000_000);
+    let executor = SqliteQueryExecutor::new(pool);
+
+    // Simple filter at scale
+    group.bench_function("simple_filter_1m", |b| {
+        let filters = vec![FilterCondition {
+            field: FilterField::Action,
+            operator: FilterOperator::Equals,
+            value: FilterValue::String("block".to_string()),
+            logic: None,
+        }];
+
         b.iter(|| {
-            let (_temp_dir, file_path) = generate_test_log_file(10000);
-            let mut index = HybridIndex::new();
-            index.build_index(
-                black_box(&file_path),
-                LogFormat::RFC3164,
-                |_| {},
-            ).unwrap();
+            let result = executor.query(black_box(&filters), 1000, 0).unwrap();
+            eprintln!("\n[1M QUERY] Simple filter: {} matches in {}ms", result.matched_count, result.execution_time_ms);
+            result
+        });
+    });
+
+    // Complex filter at scale
+    group.bench_function("complex_filter_1m", |b| {
+        let filters = vec![
+            FilterCondition {
+                field: FilterField::Action,
+                operator: FilterOperator::Equals,
+                value: FilterValue::String("block".to_string()),
+                logic: Some(LogicOperator::And),
+            },
+            FilterCondition {
+                field: FilterField::Protocol,
+                operator: FilterOperator::Equals,
+                value: FilterValue::String("TCP".to_string()),
+                logic: Some(LogicOperator::And),
+            },
+            FilterCondition {
+                field: FilterField::SourcePort,
+                operator: FilterOperator::GreaterThan,
+                value: FilterValue::Number(10000),
+                logic: None,
+            },
+        ];
+
+        b.iter(|| {
+            let result = executor.query(black_box(&filters), 1000, 0).unwrap();
+            eprintln!("\n[1M QUERY] Complex filter: {} matches in {}ms", result.matched_count, result.execution_time_ms);
+            result
         });
     });
 
     group.finish();
 }
 
-fn benchmark_indexation_large(c: &mut Criterion) {
-    let mut group = c.benchmark_group("indexation");
-    group.sample_size(10); // Reduce sample size for large benchmark
+// =============================================================================
+// FILE HASH BENCHMARKS (AC2: File hash performance)
+// =============================================================================
 
-    // Benchmark 100000 entries (~10MB)
-    group.bench_function(BenchmarkId::new("index", "100000_entries"), |b| {
-        b.iter(|| {
-            let (_temp_dir, file_path) = generate_test_log_file(100000);
-            let mut index = HybridIndex::new();
-            index.build_index(
-                black_box(&file_path),
-                LogFormat::RFC3164,
-                |_| {},
-            ).unwrap();
-        });
-    });
-
-    group.finish();
-}
-
-/// Story 6.4: Benchmark cache file hash calculation
-fn benchmark_cache_file_hash(c: &mut Criterion) {
-    let mut group = c.benchmark_group("cache");
+/// Benchmark quick file hash calculation.
+///
+/// Tests `calculate_file_hash_quick` which reads first 1MB + last 1MB.
+/// Should complete in <1 second for any file size.
+fn benchmark_file_hash(c: &mut Criterion) {
+    let mut group = c.benchmark_group("file_hash");
 
     // Small file hash (1KB)
-    group.bench_function(BenchmarkId::new("file_hash", "1kb"), |b| {
+    group.bench_function(BenchmarkId::new("hash", "1kb"), |b| {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("small.log");
-        let content = vec![b'X'; 1024]; // 1KB
+        let content = vec![b'X'; 1024];
         std::fs::write(&file_path, &content).unwrap();
 
         b.iter(|| {
-            opnsense_log_viewer_lib::indexer::calculate_file_hash(black_box(&file_path)).unwrap()
+            calculate_file_hash_quick(black_box(&file_path)).unwrap()
         });
     });
 
     // Medium file hash (10MB)
-    group.bench_function(BenchmarkId::new("file_hash", "10mb"), |b| {
+    group.bench_function(BenchmarkId::new("hash", "10mb"), |b| {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("medium.log");
-        let content = vec![b'X'; 10 * 1024 * 1024]; // 10MB
+        let content = vec![b'X'; 10 * 1024 * 1024];
         std::fs::write(&file_path, &content).unwrap();
 
         b.iter(|| {
-            opnsense_log_viewer_lib::indexer::calculate_file_hash(black_box(&file_path)).unwrap()
+            calculate_file_hash_quick(black_box(&file_path)).unwrap()
         });
     });
 
     // Large file hash (100MB) - should only read first+last 1MB
     group.sample_size(10);
-    group.bench_function(BenchmarkId::new("file_hash", "100mb"), |b| {
+    group.bench_function(BenchmarkId::new("hash", "100mb"), |b| {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("large.log");
-        let content = vec![b'X'; 100 * 1024 * 1024]; // 100MB
+        let content = vec![b'X'; 100 * 1024 * 1024];
         std::fs::write(&file_path, &content).unwrap();
 
         b.iter(|| {
-            opnsense_log_viewer_lib::indexer::calculate_file_hash(black_box(&file_path)).unwrap()
+            calculate_file_hash_quick(black_box(&file_path)).unwrap()
         });
     });
 
     group.finish();
 }
 
-/// Story 6.4: Benchmark cache save and load operations
-fn benchmark_cache_operations(c: &mut Criterion) {
-    let mut group = c.benchmark_group("cache");
+// =============================================================================
+// INDEXATION BENCHMARKS (Legacy comparison - using HybridIndex)
+// =============================================================================
 
-    // Create test tiered index with specified entry count
-    fn create_test_tiered_index(entry_count: u64) -> TieredIndex {
-        let mut inverted = InvertedIndex::new();
-        let mut bitmap = BitmapIndex::new();
-        let mut offsets = OffsetTable::new();
+use opnsense_log_viewer_lib::indexer::HybridIndex;
 
-        for i in 0..entry_count {
-            let ip = format!("192.168.{}.{}", (i / 256) % 256, i % 256);
-            inverted.add_entry(i, Some(&ip), Some("10.0.0.1"), Some(443), Some(80));
-            bitmap.add_entry(
-                i,
-                Some(if i % 2 == 0 { "block" } else { "pass" }),
-                Some("TCP"),
-                Some("vtnet0"),
-            );
-            offsets.add_offset(i, i * 100);
-        }
+/// Benchmark legacy HybridIndex for comparison with SQLite.
+fn benchmark_hybrid_index_comparison(c: &mut Criterion) {
+    let mut group = c.benchmark_group("hybrid_index_comparison");
 
-        let hot = HotIndex::from_indexes(inverted, bitmap, offsets, 0, entry_count);
-
-        TieredIndex {
-            config: TieredConfig::default(),
-            hot,
-            warm: Vec::new(),
-            total_entries: entry_count,
-        }
-    }
-
-    // Benchmark cache save (10k entries)
-    group.bench_function(BenchmarkId::new("save", "10k_entries"), |b| {
-        let temp_dir = TempDir::new().unwrap();
-        let cache = IndexCache::new(temp_dir.path().to_path_buf());
-        let log_path = temp_dir.path().join("test.log");
-        std::fs::write(&log_path, "test content").unwrap();
-        let index = create_test_tiered_index(10_000);
+    // Only test small sizes for comparison - HybridIndex doesn't scale well
+    group.bench_function(BenchmarkId::new("hybrid_index", "1000_entries"), |b| {
+        let (_temp_dir, file_path, _) = generate_csv_log_file(1000, 42);
 
         b.iter(|| {
-            cache.save_index(black_box(&log_path), black_box(&index)).unwrap();
-        });
-    });
-
-    // Benchmark cache load (10k entries)
-    group.bench_function(BenchmarkId::new("load", "10k_entries"), |b| {
-        let temp_dir = TempDir::new().unwrap();
-        let cache = IndexCache::new(temp_dir.path().to_path_buf());
-        let log_path = temp_dir.path().join("test.log");
-        std::fs::write(&log_path, "test content for loading").unwrap();
-        let index = create_test_tiered_index(10_000);
-        cache.save_index(&log_path, &index).unwrap();
-
-        b.iter(|| {
-            cache.get_cached_index(black_box(&log_path)).unwrap()
-        });
-    });
-
-    // Benchmark cache operations with larger index (100k entries)
-    group.sample_size(10);
-    group.bench_function(BenchmarkId::new("save", "100k_entries"), |b| {
-        let temp_dir = TempDir::new().unwrap();
-        let cache = IndexCache::new(temp_dir.path().to_path_buf());
-        let log_path = temp_dir.path().join("test.log");
-        std::fs::write(&log_path, "test content").unwrap();
-        let index = create_test_tiered_index(100_000);
-
-        b.iter(|| {
-            cache.save_index(black_box(&log_path), black_box(&index)).unwrap();
-        });
-    });
-
-    group.bench_function(BenchmarkId::new("load", "100k_entries"), |b| {
-        let temp_dir = TempDir::new().unwrap();
-        let cache = IndexCache::new(temp_dir.path().to_path_buf());
-        let log_path = temp_dir.path().join("test.log");
-        std::fs::write(&log_path, "test content for loading 100k").unwrap();
-        let index = create_test_tiered_index(100_000);
-        cache.save_index(&log_path, &index).unwrap();
-
-        b.iter(|| {
-            cache.get_cached_index(black_box(&log_path)).unwrap()
-        });
-    });
-
-    group.finish();
-}
-
-/// Story 6.6 (AC4, AC5): Benchmark rkyv serialization performance
-///
-/// These benchmarks verify:
-/// - AC4: rkyv is at least 10x faster than bincode for deserialization
-/// - AC5: rkyv load time scales linearly and meets <100ms target for large indexes
-fn benchmark_rkyv_serialization(c: &mut Criterion) {
-    use opnsense_log_viewer_lib::indexer::tiered::HotIndexRkyv;
-
-    let mut group = c.benchmark_group("rkyv");
-
-    // Helper to create test tiered index
-    fn create_test_tiered_index(entry_count: u64) -> TieredIndex {
-        let mut inverted = InvertedIndex::new();
-        let mut bitmap = BitmapIndex::new();
-        let mut offsets = OffsetTable::new();
-
-        for i in 0..entry_count {
-            let ip = format!("192.168.{}.{}", (i / 256) % 256, i % 256);
-            inverted.add_entry(i, Some(&ip), Some("10.0.0.1"), Some(443), Some(80));
-            bitmap.add_entry(
-                i,
-                Some(if i % 2 == 0 { "block" } else { "pass" }),
-                Some("TCP"),
-                Some("vtnet0"),
-            );
-            offsets.add_offset(i, i * 100);
-        }
-
-        let hot = HotIndex::from_indexes(inverted, bitmap, offsets, 0, entry_count);
-
-        TieredIndex {
-            config: TieredConfig::default(),
-            hot,
-            warm: Vec::new(),
-            total_entries: entry_count,
-        }
-    }
-
-    // Benchmark rkyv serialization (10K entries)
-    group.bench_function(BenchmarkId::new("serialize", "10k_entries"), |b| {
-        let index = create_test_tiered_index(10_000);
-        let hot_rkyv = HotIndexRkyv::from_hot_index(&index.hot);
-
-        b.iter(|| {
-            rkyv::to_bytes::<_, 256>(black_box(&hot_rkyv)).unwrap()
-        });
-    });
-
-    // Benchmark rkyv deserialization (10K entries)
-    group.bench_function(BenchmarkId::new("deserialize", "10k_entries"), |b| {
-        let index = create_test_tiered_index(10_000);
-        let hot_rkyv = HotIndexRkyv::from_hot_index(&index.hot);
-        let bytes = rkyv::to_bytes::<_, 256>(&hot_rkyv).unwrap();
-
-        b.iter(|| {
-            let archived = rkyv::check_archived_root::<HotIndexRkyv>(black_box(&bytes)).unwrap();
-            archived.to_hot_index()
-        });
-    });
-
-    // Benchmark rkyv serialization (50K entries) - larger dataset
-    group.sample_size(10);
-    group.bench_function(BenchmarkId::new("serialize", "50k_entries"), |b| {
-        let index = create_test_tiered_index(50_000);
-        let hot_rkyv = HotIndexRkyv::from_hot_index(&index.hot);
-
-        b.iter(|| {
-            rkyv::to_bytes::<_, 256>(black_box(&hot_rkyv)).unwrap()
-        });
-    });
-
-    // Benchmark rkyv deserialization (50K entries)
-    group.bench_function(BenchmarkId::new("deserialize", "50k_entries"), |b| {
-        let index = create_test_tiered_index(50_000);
-        let hot_rkyv = HotIndexRkyv::from_hot_index(&index.hot);
-        let bytes = rkyv::to_bytes::<_, 256>(&hot_rkyv).unwrap();
-
-        b.iter(|| {
-            let archived = rkyv::check_archived_root::<HotIndexRkyv>(black_box(&bytes)).unwrap();
-            archived.to_hot_index()
-        });
-    });
-
-    // Benchmark rkyv serialization (100K entries) - target scale
-    group.bench_function(BenchmarkId::new("serialize", "100k_entries"), |b| {
-        let index = create_test_tiered_index(100_000);
-        let hot_rkyv = HotIndexRkyv::from_hot_index(&index.hot);
-
-        b.iter(|| {
-            rkyv::to_bytes::<_, 256>(black_box(&hot_rkyv)).unwrap()
-        });
-    });
-
-    // Benchmark rkyv deserialization (100K entries)
-    group.bench_function(BenchmarkId::new("deserialize", "100k_entries"), |b| {
-        let index = create_test_tiered_index(100_000);
-        let hot_rkyv = HotIndexRkyv::from_hot_index(&index.hot);
-        let bytes = rkyv::to_bytes::<_, 256>(&hot_rkyv).unwrap();
-
-        b.iter(|| {
-            let archived = rkyv::check_archived_root::<HotIndexRkyv>(black_box(&bytes)).unwrap();
-            archived.to_hot_index()
-        });
-    });
-
-    // Benchmark rkyv serialization (1M entries) - scaling validation
-    group.bench_function(BenchmarkId::new("serialize", "1m_entries"), |b| {
-        let index = create_test_tiered_index(1_000_000);
-        let hot_rkyv = HotIndexRkyv::from_hot_index(&index.hot);
-
-        b.iter(|| {
-            rkyv::to_bytes::<_, 256>(black_box(&hot_rkyv)).unwrap()
-        });
-    });
-
-    // Benchmark rkyv deserialization (1M entries) - scaling validation for AC5
-    group.bench_function(BenchmarkId::new("deserialize", "1m_entries"), |b| {
-        let index = create_test_tiered_index(1_000_000);
-        let hot_rkyv = HotIndexRkyv::from_hot_index(&index.hot);
-        let bytes = rkyv::to_bytes::<_, 256>(&hot_rkyv).unwrap();
-
-        b.iter(|| {
-            let archived = rkyv::check_archived_root::<HotIndexRkyv>(black_box(&bytes)).unwrap();
-            archived.to_hot_index()
-        });
-    });
-
-    group.finish();
-}
-
-/// Story 6.6 (AC4): Benchmark rkyv vs bincode comparison
-///
-/// Validates that rkyv deserialization is at least 10x faster than bincode.
-fn benchmark_rkyv_vs_bincode(c: &mut Criterion) {
-    use opnsense_log_viewer_lib::indexer::tiered::HotIndexRkyv;
-
-    let mut group = c.benchmark_group("rkyv_vs_bincode");
-    group.sample_size(10);
-
-    // Helper to create test index
-    fn create_test_index(entry_count: u64) -> (InvertedIndex, BitmapIndex, OffsetTable) {
-        let mut inverted = InvertedIndex::new();
-        let mut bitmap = BitmapIndex::new();
-        let mut offsets = OffsetTable::new();
-
-        for i in 0..entry_count {
-            let ip = format!("192.168.{}.{}", (i / 256) % 256, i % 256);
-            inverted.add_entry(i, Some(&ip), Some("10.0.0.1"), Some(443), Some(80));
-            bitmap.add_entry(
-                i,
-                Some(if i % 2 == 0 { "block" } else { "pass" }),
-                Some("TCP"),
-                Some("vtnet0"),
-            );
-            offsets.add_offset(i, i * 100);
-        }
-
-        (inverted, bitmap, offsets)
-    }
-
-    // Test with 100K entries - large enough for meaningful comparison
-    let entry_count = 100_000u64;
-    let (inverted, bitmap, offsets) = create_test_index(entry_count);
-
-    // Create HotIndex
-    let hot = HotIndex::from_indexes(
-        inverted.clone(),
-        bitmap.clone(),
-        offsets.clone(),
-        0,
-        entry_count,
-    );
-
-    // === BINCODE BENCHMARKS ===
-    // Serialize with bincode
-    let bincode_bytes = bincode::serde::encode_to_vec(&hot, bincode::config::standard())
-        .expect("bincode serialization");
-
-    group.bench_function(BenchmarkId::new("bincode_deserialize", "100k"), |b| {
-        b.iter(|| {
-            let (decoded, _): (HotIndex, _) = bincode::serde::decode_from_slice(
-                black_box(&bincode_bytes),
-                bincode::config::standard(),
+            let mut index = HybridIndex::new();
+            index.build_index(
+                black_box(&file_path),
+                LogFormat::CSV,
+                |_| {},
             ).unwrap();
-            decoded
         });
     });
 
-    // === RKYV BENCHMARKS ===
-    // Serialize with rkyv
-    let hot_rkyv = HotIndexRkyv::from_hot_index(&hot);
-    let rkyv_bytes = rkyv::to_bytes::<_, 256>(&hot_rkyv).expect("rkyv serialization");
-
-    group.bench_function(BenchmarkId::new("rkyv_deserialize", "100k"), |b| {
-        b.iter(|| {
-            let archived = rkyv::check_archived_root::<HotIndexRkyv>(black_box(&rkyv_bytes)).unwrap();
-            archived.to_hot_index()
-        });
-    });
-
-    // Report sizes for context
-    eprintln!(
-        "\n[AC4 Comparison] bincode size: {} bytes, rkyv size: {} bytes",
-        bincode_bytes.len(),
-        rkyv_bytes.len()
-    );
-
-    group.finish();
-}
-
-/// Story 6.6 (AC5): Benchmark cache load at scale (1M entries)
-///
-/// Validates cache load time scales appropriately for large indexes.
-/// Note: 70M entries would take too long in CI, so we test 1M and extrapolate.
-fn benchmark_cache_load_scaling(c: &mut Criterion) {
-    let mut group = c.benchmark_group("cache_scaling");
     group.sample_size(10);
-
-    // Helper to create test tiered index
-    fn create_scaled_index(entry_count: u64) -> TieredIndex {
-        let mut inverted = InvertedIndex::new();
-        let mut bitmap = BitmapIndex::new();
-        let mut offsets = OffsetTable::new();
-
-        for i in 0..entry_count {
-            let ip = format!("192.168.{}.{}", (i / 256) % 256, i % 256);
-            inverted.add_entry(i, Some(&ip), Some("10.0.0.1"), Some(443), Some(80));
-            bitmap.add_entry(
-                i,
-                Some(if i % 2 == 0 { "block" } else { "pass" }),
-                Some("TCP"),
-                Some("vtnet0"),
-            );
-            offsets.add_offset(i, i * 100);
-        }
-
-        let hot = HotIndex::from_indexes(inverted, bitmap, offsets, 0, entry_count);
-
-        TieredIndex {
-            config: TieredConfig::default(),
-            hot,
-            warm: Vec::new(),
-            total_entries: entry_count,
-        }
-    }
-
-    // Benchmark full cache cycle for 1M entries
-    group.bench_function(BenchmarkId::new("full_cache_cycle", "1m_entries"), |b| {
-        let temp_dir = TempDir::new().unwrap();
-        let cache = IndexCache::new(temp_dir.path().to_path_buf());
-        let log_path = temp_dir.path().join("test.log");
-        std::fs::write(&log_path, "test content for 1M benchmark").unwrap();
-
-        let index = create_scaled_index(1_000_000);
-        cache.save_index(&log_path, &index).unwrap();
+    group.bench_function(BenchmarkId::new("hybrid_index", "10000_entries"), |b| {
+        let (_temp_dir, file_path, _) = generate_csv_log_file(10000, 42);
 
         b.iter(|| {
-            cache.get_cached_index(black_box(&log_path)).unwrap()
+            let mut index = HybridIndex::new();
+            index.build_index(
+                black_box(&file_path),
+                LogFormat::CSV,
+                |_| {},
+            ).unwrap();
         });
     });
 
     group.finish();
 }
 
-/// Story 6.6: Benchmark individual index component rkyv operations
-fn benchmark_rkyv_components(c: &mut Criterion) {
-    use opnsense_log_viewer_lib::indexer::bitmap::BitmapIndexRkyv;
-
-    let mut group = c.benchmark_group("rkyv_components");
-    group.sample_size(10);
-
-    // Benchmark InvertedIndex rkyv (100K entries)
-    // InvertedIndex derives rkyv directly
-    group.bench_function(BenchmarkId::new("inverted_serialize", "100k"), |b| {
-        let mut inverted = InvertedIndex::new();
-        for i in 0..100_000u64 {
-            let ip = format!("192.168.{}.{}", (i / 256) % 256, i % 256);
-            inverted.add_entry(i, Some(&ip), Some("10.0.0.1"), Some(443), Some(80));
-        }
-
-        b.iter(|| {
-            rkyv::to_bytes::<_, 256>(black_box(&inverted)).unwrap()
-        });
-    });
-
-    group.bench_function(BenchmarkId::new("inverted_deserialize", "100k"), |b| {
-        let mut inverted = InvertedIndex::new();
-        for i in 0..100_000u64 {
-            let ip = format!("192.168.{}.{}", (i / 256) % 256, i % 256);
-            inverted.add_entry(i, Some(&ip), Some("10.0.0.1"), Some(443), Some(80));
-        }
-        let bytes = rkyv::to_bytes::<_, 256>(&inverted).unwrap();
-
-        b.iter(|| {
-            let archived = rkyv::check_archived_root::<InvertedIndex>(black_box(&bytes)).unwrap();
-            let deserialized: InvertedIndex = archived.deserialize(&mut rkyv::Infallible).unwrap();
-            deserialized
-        });
-    });
-
-    // Benchmark BitmapIndex rkyv (100K entries)
-    // BitmapIndex uses a separate BitmapIndexRkyv struct due to RoaringBitmap
-    group.bench_function(BenchmarkId::new("bitmap_serialize", "100k"), |b| {
-        let mut bitmap = BitmapIndex::new();
-        for i in 0..100_000u64 {
-            bitmap.add_entry(
-                i,
-                Some(if i % 3 == 0 { "block" } else { "pass" }),
-                Some("TCP"),
-                Some("vtnet0"),
-            );
-        }
-        let rkyv_format = bitmap.to_rkyv();
-
-        b.iter(|| {
-            rkyv::to_bytes::<_, 256>(black_box(&rkyv_format)).unwrap()
-        });
-    });
-
-    group.bench_function(BenchmarkId::new("bitmap_deserialize", "100k"), |b| {
-        let mut bitmap = BitmapIndex::new();
-        for i in 0..100_000u64 {
-            bitmap.add_entry(
-                i,
-                Some(if i % 3 == 0 { "block" } else { "pass" }),
-                Some("TCP"),
-                Some("vtnet0"),
-            );
-        }
-        let rkyv_format = bitmap.to_rkyv();
-        let bytes = rkyv::to_bytes::<_, 256>(&rkyv_format).unwrap();
-
-        b.iter(|| {
-            let archived = rkyv::check_archived_root::<BitmapIndexRkyv>(black_box(&bytes)).unwrap();
-            BitmapIndex::from_archived_rkyv(archived)
-        });
-    });
-
-    // Benchmark OffsetTable rkyv (100K entries)
-    // OffsetTable derives rkyv directly
-    group.bench_function(BenchmarkId::new("offsets_serialize", "100k"), |b| {
-        let mut offsets = OffsetTable::new();
-        for i in 0..100_000u64 {
-            offsets.add_offset(i, i * 100);
-        }
-
-        b.iter(|| {
-            rkyv::to_bytes::<_, 256>(black_box(&offsets)).unwrap()
-        });
-    });
-
-    group.bench_function(BenchmarkId::new("offsets_deserialize", "100k"), |b| {
-        let mut offsets = OffsetTable::new();
-        for i in 0..100_000u64 {
-            offsets.add_offset(i, i * 100);
-        }
-        let bytes = rkyv::to_bytes::<_, 256>(&offsets).unwrap();
-
-        b.iter(|| {
-            let archived = rkyv::check_archived_root::<OffsetTable>(black_box(&bytes)).unwrap();
-            let deserialized: OffsetTable = archived.deserialize(&mut rkyv::Infallible).unwrap();
-            deserialized
-        });
-    });
-
-    group.finish();
-}
+// =============================================================================
+// BENCHMARK GROUPS
+// =============================================================================
 
 criterion_group!(
     benches,
-    benchmark_indexation_small,
-    benchmark_indexation_medium,
-    benchmark_indexation_large,
-    benchmark_cache_file_hash,
-    benchmark_cache_operations,
-    benchmark_rkyv_serialization,
-    benchmark_rkyv_vs_bincode,
-    benchmark_cache_load_scaling,
-    benchmark_rkyv_components
+    benchmark_sqlite_import,
+    benchmark_sqlite_import_large,
+    benchmark_sqlite_query,
+    benchmark_sqlite_query_large,
+    benchmark_file_hash,
+    benchmark_hybrid_index_comparison,
 );
+
 criterion_main!(benches);
