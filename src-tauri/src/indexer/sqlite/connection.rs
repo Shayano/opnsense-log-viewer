@@ -1,6 +1,7 @@
 //! SQLite Connection Configuration with PRAGMA Optimizations
 //!
 //! Story 6.1: Configures SQLite connections with performance-optimized PRAGMA settings.
+//! Story 6.4: Adds REGEXP function registration for regex filtering.
 //!
 //! ## PRAGMA Settings Applied
 //!
@@ -10,7 +11,13 @@
 //! - `mmap_size = 268435456`: 256MB memory-mapped I/O
 //! - `temp_store = MEMORY`: Temp tables in memory
 //! - `page_size = 4096`: Standard page size (must be set before any data operations)
+//!
+//! ## Custom Functions
+//!
+//! - `regexp(pattern, text)`: Returns 1 if text matches regex pattern, 0 otherwise
 
+use regex::Regex;
+use rusqlite::functions::FunctionFlags;
 use rusqlite::Connection;
 use thiserror::Error;
 
@@ -123,6 +130,48 @@ pub fn configure_connection_with_config(
 
     // Set temp store to memory
     conn.execute_batch(&format!("PRAGMA temp_store = {};", config.temp_store))?;
+
+    // Story 6.4: Register REGEXP function for regex filtering
+    register_regexp_function(conn)?;
+
+    Ok(())
+}
+
+/// Register the REGEXP function for regex pattern matching in SQL queries
+///
+/// Story 6.4: Enables `column REGEXP pattern` syntax in SQL queries.
+///
+/// # Arguments
+/// * `conn` - SQLite connection to register the function on
+///
+/// # Returns
+/// * `Ok(())` on success
+/// * `Err(ConnectionError)` if registration fails
+///
+/// # SQL Usage
+/// ```sql
+/// SELECT * FROM entries WHERE source_ip REGEXP '192\.168\.\d+\.\d+'
+/// ```
+pub fn register_regexp_function(conn: &Connection) -> Result<(), ConnectionError> {
+    conn.create_scalar_function(
+        "regexp",
+        2,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            let pattern: String = ctx.get(0)?;
+            let text: Option<String> = ctx.get(1)?;
+
+            let text = match text {
+                Some(t) => t,
+                None => return Ok(false), // NULL doesn't match
+            };
+
+            match Regex::new(&pattern) {
+                Ok(regex) => Ok(regex.is_match(&text)),
+                Err(_) => Ok(false), // Invalid regex returns false (not error)
+            }
+        },
+    )?;
 
     Ok(())
 }
@@ -377,5 +426,91 @@ mod tests {
         };
 
         assert!(!values.matches_default(), "Values should not match default");
+    }
+
+    // Story 6.4: REGEXP function tests
+    #[test]
+    fn test_regexp_function_registered() {
+        let conn = Connection::open_in_memory().unwrap();
+        configure_connection(&conn).unwrap();
+
+        // Test REGEXP with matching pattern
+        let result: bool = conn
+            .query_row(
+                "SELECT '192.168.1.1' REGEXP '^192\\.168\\.'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert!(result, "REGEXP should match");
+    }
+
+    #[test]
+    fn test_regexp_function_no_match() {
+        let conn = Connection::open_in_memory().unwrap();
+        configure_connection(&conn).unwrap();
+
+        // Test REGEXP with non-matching pattern
+        let result: bool = conn
+            .query_row(
+                "SELECT '10.0.0.1' REGEXP '^192\\.168\\.'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert!(!result, "REGEXP should not match");
+    }
+
+    #[test]
+    fn test_regexp_function_null_text() {
+        let conn = Connection::open_in_memory().unwrap();
+        configure_connection(&conn).unwrap();
+
+        // Test REGEXP with NULL text - should return false
+        let result: bool = conn
+            .query_row(
+                "SELECT NULL REGEXP '^test'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert!(!result, "REGEXP should return false for NULL");
+    }
+
+    #[test]
+    fn test_regexp_function_invalid_pattern() {
+        let conn = Connection::open_in_memory().unwrap();
+        configure_connection(&conn).unwrap();
+
+        // Test REGEXP with invalid regex pattern - should return false (not error)
+        let result: bool = conn
+            .query_row(
+                "SELECT 'test' REGEXP '[invalid'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert!(!result, "REGEXP should return false for invalid pattern");
+    }
+
+    #[test]
+    fn test_regexp_function_ip_pattern() {
+        let conn = Connection::open_in_memory().unwrap();
+        configure_connection(&conn).unwrap();
+
+        // Test realistic IP pattern matching
+        let result: bool = conn
+            .query_row(
+                "SELECT '192.168.100.50' REGEXP '192\\.168\\.\\d+\\.\\d+'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert!(result, "REGEXP should match IP pattern");
     }
 }

@@ -33,6 +33,7 @@ use crate::types::log_entry::LogFormat;
 use crate::indexer::cache::calculate_file_hash;
 
 use super::progress_emitter::ProgressEmitter;
+use super::sqlite_query::set_sqlite_pool;
 
 /// Metadata returned after SQLite index building
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,8 +178,15 @@ pub async fn build_sqlite_index(
 
             // Build metadata
             let mut metadata: SqliteIndexMetadata = stats.into();
-            metadata.file_hash = file_hash_hex;
+            metadata.file_hash = file_hash_hex.clone();
             metadata.format = format_str.to_string();
+
+            // Story 6.4: Set the SQLite pool for query commands
+            // Re-acquire pool from cache since original was moved to pipeline
+            let query_pool = get_or_create_database(&app, &path)
+                .map_err(|e| format!("Failed to get SQLite pool for queries: {}", e))?;
+            set_sqlite_pool(Arc::new(query_pool), file_hash_hex)
+                .map_err(|e| format!("Failed to set SQLite pool: {}", e))?;
 
             // Emit completion event with final statistics (AC6)
             let final_progress = IndexProgress::with_batch_info(

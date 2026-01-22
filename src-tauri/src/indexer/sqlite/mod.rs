@@ -41,7 +41,7 @@ pub mod pipeline;
 
 // Re-export public API - Story 6.1
 pub use schema::{create_schema, verify_schema, SchemaError};
-pub use connection::{configure_connection, ConnectionError};
+pub use connection::{configure_connection, register_regexp_function, ConnectionError};
 pub use pool::{SqliteConnectionPool, PoolError};
 pub use cache::{get_or_create_database, SqliteCacheError};
 

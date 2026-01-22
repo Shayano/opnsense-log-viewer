@@ -96,6 +96,11 @@ pub fn run() {
             // Story 6.3: SQLite-based indexation with real-time progress
             commands::sqlite_indexation::build_sqlite_index,
             commands::sqlite_indexation::cancel_sqlite_indexation,
+            // Story 6.4: SQLite query execution
+            commands::sqlite_query::execute_sqlite_query,
+            commands::sqlite_query::get_sqlite_entries_by_ids,
+            commands::sqlite_query::get_sqlite_entry_count,
+            commands::sqlite_query::get_sqlite_database_info,
             commands::storage::list_all_indexes,
             commands::storage::delete_index_by_hash,
             commands::storage::check_index_exists, // Story 1.7: Quick index existence check
