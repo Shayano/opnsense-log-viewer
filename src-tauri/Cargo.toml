@@ -67,6 +67,12 @@ sysinfo = "0.32"        # Memory monitoring
 rkyv = { version = "0.7.45", features = ["validation", "std"] }
 bytecheck = { version = "0.6.12" }  # Must match rkyv's bytecheck version
 
+# Story 6.1: SQLite for high-performance log indexation
+# - bundled: Compiles SQLite from source (cross-platform, no system dependency)
+# - backup: Enables backup API for potential future use
+# - functions: Enables custom SQL functions (needed for Story 6.4 REGEXP support)
+rusqlite = { version = "0.32", features = ["bundled", "backup", "functions"] }
+
 [features]
 default = ["mimalloc-allocator"]
 mimalloc-allocator = ["dep:mimalloc"]

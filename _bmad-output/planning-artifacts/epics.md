@@ -220,11 +220,14 @@ This document provides the complete epic and story breakdown for opnsense-log-vi
 - NFR-001.4: Memory Efficiency (streaming export)
 - NFR-002.2: Data Integrity (checksum, verification)
 
-**Epic 6: Memory-Efficient Large File Processing**
-- NFR-001.4: Memory Efficiency (improved: <2GB for 14GB+ files)
-- NFR-001.6: Index Load Time (improved: <500ms from cache)
-- Tech-Spec: Progressive indexation, rkyv serialization, persistent cache
-- FR-001.3: Index Persistence & Reuse (enhanced with rkyv cache)
+**Epic 6: High-Performance SQLite-Based Log Indexation**
+- NFR-001.4: Memory Efficiency (improved: <1GB for 14GB+ files)
+- NFR-001.1: Indexing Performance (improved: 300K+ entries/sec via Rayon parallel parsing)
+- NFR-001.6: Index Load Time (<500ms for existing SQLite database)
+- NFR-002.1: Crash Rate (eliminates rkyv ExceedsStorageRange panic at 72M entries)
+- NFR-002.3: Corruption Recovery (WAL journal enables crash recovery)
+- FR-001.2: Index Persistence (SQLite database persists indexes)
+- FR-003.2: Filter Performance (<500ms via SQL indexes)
 
 ## Epic List
 
@@ -294,14 +297,14 @@ Export filtered results (or complete dataset) to CSV/JSON with comprehensive met
 
 ---
 
-### Epic 6: Memory-Efficient Large File Processing
+### Epic 6: High-Performance SQLite-Based Log Indexation
 
-Enable network administrators to open very large log files (14GB+, 70M+ entries) with bounded memory usage (<2GB RAM), progressive filtering available after ~1 minute, and instant reload of previously indexed files (~100ms via persistent cache).
+Enable network administrators to open very large log files (14GB+, 70M+ entries) with bounded memory usage (<1GB RAM), real-time streaming progress, and instant reload via SQLite-backed persistent storage. Replace the current rkyv/hybrid memory architecture with a SQLite + Rayon parallel parsing pipeline.
 
-**User Outcome:** Marc can open his 14GB filter.log file, see real-time progress, start filtering after just 1 minute while indexation continues, and reload the same file instantly next time. Memory stays bounded throughout, enabling analysis on standard workstations.
+**User Outcome:** Marc opens his 14GB filter.log file, immediately sees streaming progress with entries/second metrics, UI remains fully responsive throughout (no "not responding" state). Import completes in ~2-4 minutes at 300K+ entries/sec, memory stays under 1GB. Reopening the same file is instant (<500ms) because SQLite database already exists.
 
-**Tech-Spec Reference:** `tech-spec-hybrid-progressive-indexation.md`
-**NFRs Addressed:** NFR-001.4 (memory <2GB), NFR-001.6 (load time <500ms cached)
+**Architecture Decision:** SQLite + Rayon replaces rkyv + mmap hybrid approach
+**NFRs Addressed:** NFR-001.4 (memory <1GB), NFR-001.1 (300K+ entries/sec), NFR-001.6 (load <500ms), NFR-002.1 (no crashes)
 
 ---
 
@@ -1827,216 +1830,497 @@ So that I can trust the export data for compliance audits and ensure no corrupti
 
 ---
 
-## Epic 6: Memory-Efficient Large File Processing
+## Epic 6: High-Performance SQLite-Based Log Indexation
 
-Enable network administrators to open very large log files (14GB+, 70M+ entries) with bounded memory usage (<2GB RAM), progressive filtering available after ~1 minute, and instant reload of previously indexed files (~100ms via persistent cache).
+Enable network administrators to open very large log files (14GB+, 70M+ entries) with bounded memory usage (<1GB RAM), real-time streaming progress, and instant reload via SQLite-backed persistent storage. Replace the current rkyv/hybrid memory architecture with a SQLite + Rayon parallel parsing pipeline.
 
-**User Outcome:** Marc can open his 14GB filter.log file, see real-time progress ("45% - 32M/71M entries - Batch 6/14"), start filtering after just 1 minute while indexation continues in background, and reload the same file instantly next time thanks to persistent cache. Memory stays bounded throughout, enabling analysis on standard workstations.
+**User Outcome:** Marc opens his 14GB filter.log file, immediately sees streaming progress with entries/second metrics, UI remains fully responsive throughout (no "not responding" state). Import completes in ~2-4 minutes at 300K+ entries/sec, memory stays under 1GB. Reopening the same file is instant (<500ms) because SQLite database already exists.
 
-**NFRs Addressed:** NFR-001.4 (Memory Efficiency - improved from 20GB to <2GB peak), NFR-001.6 (Index Load Time - improved from ~10min to <500ms for cached files)
+**NFRs Addressed:**
+- NFR-001.4 (Memory Efficiency - improved from 6GB+ to <1GB peak)
+- NFR-001.1 (Indexing Performance - improved from 154K to 300K+ entries/sec)
+- NFR-001.6 (Index Load Time - <500ms for existing SQLite database)
+- NFR-002.1 (Crash Rate - eliminates rkyv ExceedsStorageRange panic)
 
-**Tech-Spec Reference:** `_bmad-output/implementation-artifacts/tech-spec-hybrid-progressive-indexation.md`
+**Architecture Decision:** SQLite + Rayon replaces rkyv + mmap hybrid approach
+
+**Rationale:**
+1. **rkyv 32-bit pointer limit** - Current architecture crashes at ~72M entries due to ExceedsStorageRange
+2. **Memory efficiency** - SQLite writes to disk immediately; no RAM accumulation during merge
+3. **Crash recovery** - SQLite transactions provide ACID guarantees; interrupted imports can resume
+4. **Query flexibility** - SQL allows complex queries without custom bitmap/inverted index code
+5. **Industry-proven** - SQLite handles billions of rows; this is "boring technology" that works
+
+**Performance Expectations:**
+| Metric | Current (rkyv) | Target (SQLite) |
+|--------|----------------|-----------------|
+| Import speed | 154K entries/sec | 300K+ entries/sec |
+| Peak memory | 6GB+ (crashes) | <1GB |
+| Max entries | ~72M (crashes) | Unlimited |
+| Cache reload | N/A (crashes) | <500ms |
+| UI responsiveness | "Not responding" 2min | Always responsive |
 
 ---
 
-### Story 6.1: Memory-Efficient Large File Indexation *(Existing - Tasks 1-3 Complete)*
-
-As a network administrator,
-I want large log files to be indexed using streaming batch processing with string interning,
-So that memory usage remains bounded and doesn't crash my workstation.
-
-**Status:** Tasks 1-3 COMPLETED (streaming.rs, interner.rs, tiered.rs implemented)
-**Remaining:** Tasks 4-6 replaced by Stories 6.2-6.6
-
----
-
-### Story 6.2: rkyv Zero-Copy Serialization Foundation
+### Story 6.1: SQLite Schema & Connection Infrastructure
 
 As a developer,
-I want index serialization migrated from bincode to rkyv with zero-copy deserialization,
-So that index loading achieves <100ms for 70M entries and enables the cache system.
+I want a SQLite database schema optimized for log storage and querying,
+So that the application can efficiently store and query 70M+ entries.
 
 **Acceptance Criteria:**
 
-**Given** the rkyv crate is added to Cargo.toml
-**When** I derive rkyv traits on InvertedIndex, BitmapIndex, and OffsetTable
-**Then** all index types support Archive, Serialize, and Deserialize traits
-**And** RoaringBitmap uses a custom wrapper for byte serialization
+**Given** rusqlite is added as a dependency
+**When** I create the database schema
+**Then** the following tables exist:
+```sql
+-- Core log entries (denormalized for query performance)
+CREATE TABLE entries (
+    id INTEGER PRIMARY KEY,
+    byte_offset INTEGER NOT NULL,
+    timestamp TEXT NOT NULL,
+    source_ip TEXT,
+    source_port INTEGER,
+    dest_ip TEXT,
+    dest_port INTEGER,
+    action TEXT NOT NULL,
+    protocol TEXT,
+    interface TEXT,
+    rule_id TEXT,
+    raw_line TEXT
+);
 
-**Given** the streaming.rs batch serialization uses bincode
-**When** I migrate save_batch_to_disk() and load_batch_from_disk() to rkyv
-**Then** batch files use rkyv format with validation on load
-**And** file magic bytes "OPNSRKYV" identify the format
+-- File metadata
+CREATE TABLE file_info (
+    id INTEGER PRIMARY KEY,
+    file_path TEXT NOT NULL,
+    file_hash TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
+    entry_count INTEGER DEFAULT 0,
+    indexed_at TEXT NOT NULL,
+    UNIQUE(file_hash)
+);
 
-**Given** the tiered.rs WarmIndex uses bincode
-**When** I migrate WarmIndex::create() and lazy-load methods to rkyv
-**Then** warm tier files support zero-copy access from mmap
-**And** no full deserialization is required for queries
+-- Indexes for fast filtering
+CREATE INDEX idx_source_ip ON entries(source_ip);
+CREATE INDEX idx_dest_ip ON entries(dest_ip);
+CREATE INDEX idx_action ON entries(action);
+CREATE INDEX idx_protocol ON entries(protocol);
+CREATE INDEX idx_interface ON entries(interface);
+CREATE INDEX idx_timestamp ON entries(timestamp);
+CREATE INDEX idx_ports ON entries(source_port, dest_port);
+```
 
-**And** all existing tests continue to pass
-**And** index round-trip tests verify serialization correctness
+**Given** the database is opened
+**When** I apply SQLite PRAGMA settings
+**Then** the following optimizations are active:
+```sql
+PRAGMA journal_mode = WAL;        -- Concurrent reads during write
+PRAGMA synchronous = NORMAL;      -- Safe for WAL, avoid fsync per commit
+PRAGMA cache_size = -64000;       -- 64MB cache
+PRAGMA mmap_size = 268435456;     -- 256MB memory-mapped I/O
+PRAGMA temp_store = MEMORY;       -- Temp tables in memory
+PRAGMA page_size = 4096;          -- Standard page size
+```
 
-**Tasks:** 1-7, 14-15 from tech-spec (Phases 1, 2, 5)
+**Given** a connection pool is needed for concurrent access
+**When** I implement SqliteConnectionPool
+**Then** it provides:
+- Read-only connections for queries (multiple)
+- Single write connection for inserts (exclusive)
+- Connection recycling with health checks
+- Graceful shutdown with pending commit flush
+
+**Given** a new log file is opened
+**When** I call get_or_create_database(file_path)
+**Then** the database is stored at `{app_data}/log_indexes/{file_hash}.sqlite`
+**And** if database already exists and hash matches, return existing connection
+**And** if hash differs, delete old database and create new
+
+**Tasks:**
+1. Add rusqlite dependency with bundled-sqlcipher feature
+2. Implement schema.rs with CREATE TABLE statements
+3. Implement connection.rs with PRAGMA configuration
+4. Implement pool.rs with read/write connection management
+5. Implement cache.rs with hash-based database lookup
+6. Unit tests for schema creation and PRAGMA verification
 
 ---
 
-### Story 6.3: Progressive Indexation with Early Filtering
+### Story 6.2: Parallel Parsing Pipeline with Rayon + Crossbeam Channels
 
-As a network administrator,
-I want to start filtering logs after the first batch completes (~1 minute),
-So that I can begin my investigation immediately without waiting for full indexation.
+As a developer,
+I want log parsing parallelized across CPU cores with a single SQLite writer thread,
+So that import speed reaches 300K+ entries/second while maintaining bounded memory.
 
 **Acceptance Criteria:**
 
-**Given** a 14GB log file is being indexed
-**When** the first batch (~1GB) completes processing
-**Then** the UI shows "Partial filtering available"
-**And** I can apply filters to the indexed portion
-**And** results update as more batches complete
+**Given** a log file is opened for indexing
+**When** I implement the parallel parsing pipeline
+**Then** the architecture follows this pattern:
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  File Reader    │ --> │ Bounded Channel │ --> │ SQLite Writer   │
+│  (BufReader)    │     │ (crossbeam)     │     │ (Single Thread) │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+        │                       ^
+        v                       │
+┌─────────────────┐             │
+│  Rayon Workers  │ ────────────┘
+│ (Parallel Parse)│
+└─────────────────┘
+```
 
-**Given** progressive indexation is running
+**Given** the BufReader streams lines from the file
+**When** lines are distributed to Rayon workers via par_bridge()
+**Then** each worker parses the line independently
+**And** ParsedEntry structs are sent to bounded channel (capacity: 50,000)
+**And** backpressure prevents memory growth when writer is slow
+
+**Given** the SQLite writer thread receives ParsedEntry structs
+**When** it accumulates a batch of 10,000 entries
+**Then** it inserts them in a single transaction:
+```rust
+let tx = conn.transaction()?;
+{
+    let mut stmt = tx.prepare_cached(
+        "INSERT INTO entries (...) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    )?;
+    for entry in batch {
+        stmt.execute(params![...])?;
+    }
+}
+tx.commit()?;
+```
+
+**Given** the import is running
 **When** I observe memory usage
-**Then** peak RAM stays below 2GB throughout the entire process
-**And** each batch is written to warm tier before processing next batch
+**Then** peak RAM stays below 1GB regardless of file size
+**And** the bounded channel (50K entries × ~200 bytes = ~10MB) limits buffering
+**And** SQLite writes flush to disk, not accumulating in memory
 
-**Given** IndexProgress struct exists
-**When** I extend it for progressive availability
-**Then** it includes: entries_indexed, total_entries_estimated, partial_filter_available, batches_completed, total_batches
+**Given** a 14GB file with 72M entries
+**When** import completes
+**Then** processing time is <4 minutes (300K entries/sec minimum)
+**And** no rkyv ExceedsStorageRange panic occurs
+**And** UI remains responsive throughout (no "not responding")
 
-**Given** the streaming merge phase accumulates in RAM
-**When** I refactor to use TieredIndex output
-**Then** older entries are written to WarmIndex incrementally
-**And** only the last 5M entries remain in HotIndex
+**Given** an import is interrupted (crash, user cancel)
+**When** the application restarts
+**Then** partial database is detected via entry_count < expected
+**And** user is prompted to resume or restart import
+**And** WAL journal allows safe recovery
 
-**And** the ProgressiveIndex wrapper is thread-safe (Arc<RwLock<TieredIndex>>)
-**And** queries on partial index return results for indexed portion only
-
-**Tasks:** 8-10 from tech-spec (Phase 3)
+**Tasks:**
+1. Add crossbeam-channel and rayon dependencies
+2. Implement parallel_parser.rs with Rayon par_bridge() pipeline
+3. Implement batch_writer.rs with transaction batching (10K rows)
+4. Implement progress tracking with atomic counters
+5. Add channel backpressure with bounded(50_000)
+6. Integration test with 100MB fixture file
+7. Benchmark comparing to current streaming.rs
 
 ---
 
-### Story 6.4: Persistent Index Cache for Instant Reload
+### Story 6.3: Real-Time Streaming Progress & Non-Blocking UI
 
 As a network administrator,
-I want previously indexed files to reload instantly from cache,
-So that I don't wait 10 minutes every time I reopen the same log file.
+I want real-time progress updates during import without UI freezing,
+So that I know exactly how fast indexing is progressing and can continue using the app.
 
 **Acceptance Criteria:**
 
-**Given** a log file was previously indexed
-**When** I open the same file again (unchanged)
-**Then** the index loads from cache in <500ms
-**And** the UI shows "Loaded from cache"
-**And** the "index-cache-hit" event is emitted
+**Given** a file import is started
+**When** the import begins
+**Then** immediately (within 100ms) the UI shows:
+- File name and size
+- "Starting import..."
+- Progress bar at 0%
 
-**Given** a cached index exists for a file
-**When** the file content changes (different hash)
-**Then** the cache is invalidated automatically
-**And** full re-indexation occurs
-**And** the "index-cache-miss" event is emitted
+**Given** import is in progress
+**When** progress events are emitted (every 1 second)
+**Then** the UI displays:
+- Percentage: "45%"
+- Entries processed: "32,450,000 / 71,930,527"
+- Speed: "312,000 entries/sec"
+- Time elapsed: "1:43"
+- ETA: "~2:15 remaining"
 
-**Given** file hash calculation is needed
-**When** I implement calculate_file_hash()
-**Then** it uses SHA256 on first 1MB + last 1MB + file size
-**And** calculation completes in <1 second for any file size
+**Given** the import uses Tauri async commands
+**When** I implement the non-blocking pattern
+**Then** build_sqlite_index() is marked #[tauri::command(async)]
+**And** progress is emitted via app.emit("indexation-progress", payload)
+**And** UI thread is never blocked by Rust computation
 
-**Given** IndexCache manager is implemented
-**When** I call get_cached_index(file_path)
-**Then** it checks hash validity and returns TieredIndex if valid
-**And** cache location is {app_data}/index_cache/{file_hash}.rkyv
+**Given** IndexProgress struct needs updates
+**When** I extend it for SQLite streaming
+**Then** it includes:
+```typescript
+interface IndexProgress {
+    phase: "parsing" | "indexing" | "complete";
+    entriesProcessed: number;
+    totalEntriesEstimated: number;
+    bytesProcessed: number;
+    totalBytes: number;
+    entriesPerSecond: number;
+    elapsedSeconds: number;
+    estimatedSecondsRemaining: number;
+}
+```
+
+**Given** the frontend receives progress events
+**When** it updates the progress UI
+**Then** the progress bar animates smoothly
+**And** numbers update every second
+**And** the main window remains interactive (can minimize, move, close)
+
+**Given** the import completes
+**When** the final event is emitted
+**Then** the UI shows:
+- "Import complete!"
+- Total entries: "71,930,527"
+- Total time: "3:58"
+- Average speed: "301,245 entries/sec"
+**And** a toast notification appears with success message
+
+**Tasks:**
+1. Refactor build_hybrid_index to async SQLite version
+2. Implement progress tracking with AtomicU64 counters
+3. Add progress emission thread (1 Hz frequency)
+4. Update IndexProgress TypeScript interface
+5. Update frontend progress component with new fields
+6. Add speed calculation (rolling 5-second average)
+7. Test UI responsiveness during 1GB file import
+
+---
+
+### Story 6.4: SQL Query Execution Layer
+
+As a developer,
+I want filter queries translated to efficient SQL statements,
+So that existing filter UI works with the new SQLite backend without changes.
+
+**Acceptance Criteria:**
+
+**Given** a FilterAST exists from the current filter builder
+**When** I implement FilterToSql converter
+**Then** filter conditions map to SQL WHERE clauses:
+```rust
+// FilterAST → SQL examples:
+// source_ip equals "192.168.1.1" → WHERE source_ip = '192.168.1.1'
+// action in ["PASS", "BLOCK"] → WHERE action IN ('PASS', 'BLOCK')
+// source_port > 1024 → WHERE source_port > 1024
+// timestamp between A and B → WHERE timestamp BETWEEN 'A' AND 'B'
+// regex match → WHERE source_ip REGEXP 'pattern' (requires regexp extension)
+// AND/OR/NOT → standard SQL boolean operators
+```
+
+**Given** a query is executed
+**When** I call query_entries(filters, pagination)
+**Then** the SQL query includes:
+- Parameterized WHERE clause (no SQL injection)
+- ORDER BY id for consistent ordering
+- LIMIT and OFFSET for pagination
+- COUNT(*) OVER() for total count without second query
+
+**Given** existing HybridIndex query interface
+**When** I implement SqliteQueryExecutor
+**Then** it matches the same public API:
+```rust
+impl QueryExecutor for SqliteQueryExecutor {
+    fn query(&self, filters: &[Filter], limit: usize, offset: usize)
+        -> Result<QueryResult>;
+    fn count(&self, filters: &[Filter]) -> Result<u64>;
+    fn get_entry(&self, id: u64) -> Result<Option<LogEntry>>;
+}
+```
+
+**Given** the frontend executes a query
+**When** results are returned
+**Then** response time is <500ms for simple queries
+**And** response time is <750ms for complex queries (5+ filters, regex)
+**And** results include total count for pagination UI
+
+**Given** query execution happens
+**When** I use read-only connection from pool
+**Then** concurrent queries are supported
+**And** import can continue while queries execute (WAL mode)
+
+**Tasks:**
+1. Implement filter_to_sql.rs with AST to SQL conversion
+2. Implement query_executor.rs with parameterized queries
+3. Add SQLite regexp extension (rusqlite-regex crate)
+4. Implement pagination with LIMIT/OFFSET
+5. Add query caching for repeated identical queries
+6. Integration test with complex filter combinations
+7. Benchmark query performance vs current bitmap approach
+
+---
+
+### Story 6.5: Migration, Cleanup & Dependency Removal
+
+As a developer,
+I want old indexer code removed and dependencies cleaned up,
+So that the codebase is simplified and maintenance burden is reduced.
+
+**Acceptance Criteria:**
+
+**Given** SQLite implementation is complete and tested
+**When** I remove deprecated code
+**Then** the following files are deleted:
+- `src-tauri/src/indexer/tiered.rs` (46.5KB)
+- `src-tauri/src/indexer/interner.rs` (8.7KB)
+- `src-tauri/src/indexer/streaming.rs` (batch persistence portions)
+- `src-tauri/src/storage/persistence.rs` (rkyv helpers)
+
+**Given** dependencies need cleanup
+**When** I update Cargo.toml
+**Then** the following are removed:
+- `rkyv` = "0.7.45"
+- `bytecheck` = "0.6.12"
+- `memmap2` = "0.9"
+- `lasso` = "0.7" (string interning)
+
+**And** the following are added:
+- `rusqlite` = { version = "0.32", features = ["bundled", "backup", "functions"] }
+- `crossbeam-channel` = "0.5"
+- `rusqlite-regex` = "0.2" (for REGEXP support)
 
 **Given** hybrid.rs orchestrates indexation
-**When** I integrate cache checking
-**Then** build_index() first checks cache (fast path)
-**And** on cache miss, runs progressive indexation and saves to cache on completion
+**When** I refactor for SQLite
+**Then** threshold-based strategy is simplified:
+- Small files (<100MB): Single-threaded sequential insert
+- Large files (≥100MB): Parallel Rayon + channel pipeline
+- No more tiered/warm/hot index complexity
 
-**Tasks:** 11-13 from tech-spec (Phase 4)
+**Given** existing index cache files exist
+**When** user opens a previously indexed file
+**Then** old .rkyv cache files are ignored
+**And** new .sqlite database is created
+**And** migration message displayed: "Rebuilding index for improved performance..."
 
----
+**Given** all tests pass
+**When** I run the full test suite
+**Then** zero regressions in functionality
+**And** performance benchmarks show improvement
+**And** memory usage benchmarks show <1GB peak
 
-### Story 6.5: Progressive Loading UI Feedback
-
-As a network administrator,
-I want clear visual feedback during progressive loading,
-So that I understand indexation progress and know when I can start filtering.
-
-**Acceptance Criteria:**
-
-**Given** progressive indexation is running
-**When** each batch completes
-**Then** the UI updates with:
-- Percentage: "45%"
-- Entries: "32M / 71M entries"
-- Batches: "Batch 6 / 14"
-- Speed and ETA (existing)
-
-**Given** the first batch completes
-**When** partial_filter_available becomes true
-**Then** a badge appears: "Partial filtering available"
-**And** the badge is visually prominent (green indicator)
-
-**Given** a file loads from cache
-**When** the index-cache-hit event fires
-**Then** a toast notification appears: "Index loaded from cache"
-**And** the progress dialog shows "Loaded from cache (instant)"
-
-**Given** FileState in Zustand store exists
-**When** I extend it for progressive loading
-**Then** it includes: indexProgress, partialFilterAvailable, cacheHit
-
-**And** the UI follows existing Tailwind patterns
-**And** dark/light theme support is maintained
-
-**Tasks:** 16-18 from tech-spec (Phase 6)
+**Tasks:**
+1. Create feature flag `sqlite-indexer` for gradual migration
+2. Implement parallel indexer under feature flag
+3. Add migration detection for old cache files
+4. Remove deprecated files after validation
+5. Update Cargo.toml dependencies
+6. Run full integration test suite
+7. Update documentation and README
 
 ---
 
-### Story 6.6: Performance Validation & Testing
+### Story 6.6: Performance Validation & Benchmarking
 
 As a developer,
-I want comprehensive tests and benchmarks for the progressive indexation system,
-So that I can verify performance targets are met and prevent regressions.
+I want comprehensive benchmarks proving SQLite approach meets targets,
+So that we have confidence the migration improves real-world performance.
 
 **Acceptance Criteria:**
 
-**Given** rkyv serialization is implemented
-**When** I run round-trip unit tests
-**Then** all index types serialize and deserialize correctly
-**And** tests cover InvertedIndex, BitmapIndex, OffsetTable with 100K+ entries
+**Given** benchmark fixtures exist (100MB, 1GB, 10GB)
+**When** I run import benchmarks
+**Then** results show:
+- 100MB file: <10 seconds (>10K entries/sec)
+- 1GB file: <60 seconds (>100K entries/sec)
+- 10GB file: <5 minutes (>200K entries/sec)
+- Memory peak: <1GB for all sizes
 
-**Given** progressive indexation is implemented
-**When** I run integration tests
-**Then** partial filtering works during indexation
-**And** memory stays bounded (<2GB peak)
-**And** test uses ~100MB log file fixture
+**Given** query benchmarks are needed
+**When** I run query performance tests
+**Then** results show:
+- Simple filter (single field): <200ms
+- Complex filter (5+ fields, AND/OR): <500ms
+- Regex filter: <750ms
+- Count query: <100ms
 
-**Given** cache system is implemented
-**When** I run cache invalidation tests
-**Then** cache hit, miss, and invalidation scenarios all pass
-**And** hash changes trigger re-indexation
+**Given** comparison with previous implementation
+**When** I document improvement metrics
+**Then** report includes:
+| Metric | Before (rkyv) | After (SQLite) | Improvement |
+|--------|---------------|----------------|-------------|
+| 14GB import | 465s (crashes) | <240s | 2x + stable |
+| Peak memory | 6GB (OOM) | <1GB | 6x reduction |
+| Max entries | ~72M (crash) | Unlimited | Removes limit |
+| Cache reload | N/A | <500ms | New capability |
 
-**Given** criterion benchmarks exist
-**When** I benchmark rkyv vs bincode
-**Then** rkyv load time for 70M entries is <100ms
-**And** rkyv is at least 10x faster than bincode for deserialization
+**Given** CI/CD needs updated gates
+**When** I update performance thresholds
+**Then** the following gates are enforced:
+- Import speed: ≥200K entries/sec
+- Query latency: <750ms (P95)
+- Memory peak: <1GB
+- No panics or crashes
 
-**And** all 7 Acceptance Criteria from tech-spec are validated
-**And** performance gates in CI/CD are updated if needed
+**Given** stress testing is needed
+**When** I run extended tests
+**Then** application handles:
+- 100M entry import without crash
+- 1000 consecutive queries without memory growth
+- 24-hour soak test without degradation
 
-**Tasks:** 19-22 from tech-spec (Phase 7)
+**Tasks:**
+1. Create benchmark fixtures (100MB, 1GB, 10GB)
+2. Implement criterion benchmarks for import
+3. Implement criterion benchmarks for queries
+4. Create before/after comparison document
+5. Update CI/CD performance gates
+6. Run 100M entry stress test
+7. Document results in BENCHMARKS.md
 
 ---
 
-### Epic 6 FR Coverage Map
+### Epic 6 Story Dependencies
 
-| Tech-Spec Reference | Story | Description |
-|---------------------|-------|-------------|
-| Tasks 1-4 (Phase 1) | 6.2 | rkyv dependencies and derives |
-| Tasks 5-7 (Phase 2) | 6.2 | Streaming migration bincode→rkyv |
-| Tasks 8-10 (Phase 3) | 6.3 | Progressive indexation with partial filtering |
-| Tasks 11-13 (Phase 4) | 6.4 | Persistent cache system |
-| Tasks 14-15 (Phase 5) | 6.2 | Warm tier rkyv migration |
-| Tasks 16-18 (Phase 6) | 6.5 | Frontend progressive UI |
-| Tasks 19-22 (Phase 7) | 6.6 | Testing and validation |
-| NFR-001.4 | 6.3 | Memory bounded <2GB |
-| NFR-001.6 | 6.4 | Index load <500ms from cache |
+```
+Story 6.1 (Schema & Connection)
+    ↓
+Story 6.2 (Parallel Pipeline)
+    ↓
+Story 6.3 (Progress UI)        Story 6.4 (Query Layer)
+    ↓                              ↓
+    └──────────┬───────────────────┘
+               ↓
+Story 6.5 (Migration & Cleanup)
+               ↓
+Story 6.6 (Performance Validation)
+```
+
+### Epic 6 FR/NFR Coverage Map
+
+| Requirement | Story | How Addressed |
+|-------------|-------|---------------|
+| NFR-001.1 (Indexing ≥6GB/min) | 6.2 | Rayon parallelism achieves 300K+ entries/sec |
+| NFR-001.4 (Memory <500MB) | 6.2, 6.3 | SQLite disk persistence, bounded channels |
+| NFR-001.6 (Load <2s) | 6.1 | Existing SQLite database opens in <500ms |
+| NFR-002.1 (Crash <0.1%) | 6.2 | Removes rkyv 32-bit limit crash |
+| NFR-002.3 (Corruption recovery) | 6.1 | WAL journal enables crash recovery |
+| FR-001.2 (Index persistence) | 6.1 | SQLite database persists indexes |
+| FR-003.2 (Filter <500ms) | 6.4 | SQL indexes enable fast queries |
+
+### Files Changed Summary
+
+**New Files:**
+- `src-tauri/src/storage/sqlite/schema.rs` (~200 LOC)
+- `src-tauri/src/storage/sqlite/connection.rs` (~300 LOC)
+- `src-tauri/src/storage/sqlite/pool.rs` (~200 LOC)
+- `src-tauri/src/indexer/parallel_parser.rs` (~400 LOC)
+- `src-tauri/src/indexer/batch_writer.rs` (~300 LOC)
+- `src-tauri/src/query/filter_to_sql.rs` (~400 LOC)
+- `src-tauri/src/query/sqlite_executor.rs` (~300 LOC)
+
+**Deleted Files:**
+- `src-tauri/src/indexer/tiered.rs` (46.5KB)
+- `src-tauri/src/indexer/interner.rs` (8.7KB)
+- `src-tauri/src/storage/persistence.rs` (16.6KB - rkyv portions)
+
+**Modified Files:**
+- `src-tauri/Cargo.toml` (dependency changes)
+- `src-tauri/src/indexer/hybrid.rs` (strategy simplification)
+- `src-tauri/src/commands/indexation.rs` (async SQLite commands)
