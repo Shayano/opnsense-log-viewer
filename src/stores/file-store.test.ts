@@ -26,11 +26,13 @@ describe('useFileStore', () => {
           totalBytes: 2147483648, // 2GB
           speedGbps: 1.5,
           etaSeconds: 60,
-          entriesProcessed: 5000000,
-          totalEntriesEstimate: 10000000,
-          currentBatch: 3,
+          entriesIndexed: 5000000,
+          totalEntriesEstimated: 10000000,
+          batchesCompleted: 3,
           totalBatches: 7,
           partialFilterAvailable: true,
+          entriesPerSecond: 83333,
+          elapsedSeconds: 60,
         };
 
         setIndexProgress(progress);
@@ -38,7 +40,7 @@ describe('useFileStore', () => {
         const state = useFileStore.getState();
         expect(state.indexProgress).toEqual(progress);
         expect(state.indexProgress?.percentage).toBe(50);
-        expect(state.indexProgress?.currentBatch).toBe(3);
+        expect(state.indexProgress?.batchesCompleted).toBe(3);
         expect(state.indexProgress?.totalBatches).toBe(7);
       });
 
@@ -50,11 +52,13 @@ describe('useFileStore', () => {
           totalBytes: 2000000000,
           speedGbps: 2.0,
           etaSeconds: 30,
-          entriesProcessed: 7500000,
-          totalEntriesEstimate: 10000000,
-          currentBatch: 5,
+          entriesIndexed: 7500000,
+          totalEntriesEstimated: 10000000,
+          batchesCompleted: 5,
           totalBatches: 7,
           partialFilterAvailable: true,
+          entriesPerSecond: 125000,
+          elapsedSeconds: 60,
         };
 
         setIndexProgress(progress);
@@ -76,11 +80,13 @@ describe('useFileStore', () => {
           totalBytes: 2000000000,
           speedGbps: 1.0,
           etaSeconds: 120,
-          entriesProcessed: 2500000,
-          totalEntriesEstimate: 10000000,
-          currentBatch: 2,
+          entriesIndexed: 2500000,
+          totalEntriesEstimated: 10000000,
+          batchesCompleted: 2,
           totalBatches: 8,
           partialFilterAvailable: false,
+          entriesPerSecond: 41667,
+          elapsedSeconds: 60,
         };
 
         setIndexProgress(progress);
@@ -148,11 +154,13 @@ describe('useFileStore', () => {
           totalBytes: 2000000000,
           speedGbps: 2.5,
           etaSeconds: 0,
-          entriesProcessed: 10000000,
-          totalEntriesEstimate: 10000000,
-          currentBatch: 7,
+          entriesIndexed: 10000000,
+          totalEntriesEstimated: 10000000,
+          batchesCompleted: 7,
           totalBatches: 7,
           partialFilterAvailable: true,
+          entriesPerSecond: 100000,
+          elapsedSeconds: 100,
         };
 
         setIndexProgress(progress);
@@ -195,11 +203,13 @@ describe('useFileStore', () => {
           totalBytes: 2000000000,
           speedGbps: 1.8,
           etaSeconds: 45,
-          entriesProcessed: 4200000,
-          totalEntriesEstimate: 10000000,
-          currentBatch: 3,
+          entriesIndexed: 4200000,
+          totalEntriesEstimated: 10000000,
+          batchesCompleted: 3,
           totalBatches: 7,
           partialFilterAvailable: false,
+          entriesPerSecond: 70000,
+          elapsedSeconds: 60,
         };
 
         setIndexProgress(progress);
@@ -207,7 +217,7 @@ describe('useFileStore', () => {
         // Test selector returns current state
         const indexProgress = useFileStore.getState().indexProgress;
         expect(indexProgress?.percentage).toBe(42);
-        expect(indexProgress?.currentBatch).toBe(3);
+        expect(indexProgress?.batchesCompleted).toBe(3);
       });
 
       it('should return partialFilterAvailable via selector', () => {

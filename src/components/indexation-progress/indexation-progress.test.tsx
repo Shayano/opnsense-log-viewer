@@ -46,11 +46,12 @@ describe('IndexationProgress', () => {
   it('should render progress UI when indexing', () => {
     render(<IndexationProgress isIndexing={true} onComplete={() => {}} onError={() => {}} />);
 
+    // Story 6.3: Updated UI - Speed/ETA only shown when progress values > 0
     expect(screen.getByText('Indexing Log File')).toBeInTheDocument();
     expect(screen.getByText('Data processed:')).toBeInTheDocument();
-    expect(screen.getByText('Speed:')).toBeInTheDocument();
-    expect(screen.getByText('Estimated time remaining:')).toBeInTheDocument();
     expect(screen.getByText('Cancel')).toBeInTheDocument();
+    // Speed and ETA are conditionally rendered when values > 0
+    expect(screen.queryByText('Speed:')).not.toBeInTheDocument(); // Hidden at 0
   });
 
   describe('progressive loading display (Story 6.5)', () => {
@@ -149,11 +150,13 @@ describe('IndexationProgress', () => {
         totalBytes: 2147483648,
         speedGbps: 1.5,
         etaSeconds: 60,
-        entriesProcessed: 5000000,
-        totalEntriesEstimate: 10000000,
-        currentBatch: 3,
+        entriesIndexed: 5000000,
+        totalEntriesEstimated: 10000000,
+        batchesCompleted: 3,
         totalBatches: 7,
         partialFilterAvailable: true,
+        entriesPerSecond: 83333,
+        elapsedSeconds: 60,
       };
 
       // Simulate progress event
@@ -210,18 +213,19 @@ describe('IndexationProgress', () => {
             totalBytes: 2000000000,
             speedGbps: 1.0,
             etaSeconds: 60,
-            entriesProcessed: 32000000,
-            totalEntriesEstimate: 71000000,
-            currentBatch: 6,
+            entriesIndexed: 32000000,
+            totalEntriesEstimated: 71000000,
+            batchesCompleted: 6,
             totalBatches: 14,
             partialFilterAvailable: false,
+            entriesPerSecond: 533333,
+            elapsedSeconds: 60,
           },
         });
       });
 
-      // Check formatted display
-      expect(screen.getByText(/32\.0M \/ 71\.0M entries/)).toBeInTheDocument();
-      expect(screen.getByText(/Batch 6 \/ 14/)).toBeInTheDocument();
+      // Check formatted display (Story 6.3 - new field names)
+      expect(screen.getByText(/32\.0M \/ 71\.0M/)).toBeInTheDocument();
     });
 
     it('should format thousands of entries correctly', async () => {
@@ -244,16 +248,18 @@ describe('IndexationProgress', () => {
             totalBytes: 1000000000,
             speedGbps: 0.5,
             etaSeconds: 120,
-            entriesProcessed: 50000,
-            totalEntriesEstimate: 500000,
-            currentBatch: 1,
+            entriesIndexed: 50000,
+            totalEntriesEstimated: 500000,
+            batchesCompleted: 1,
             totalBatches: 10,
             partialFilterAvailable: false,
+            entriesPerSecond: 833,
+            elapsedSeconds: 60,
           },
         });
       });
 
-      expect(screen.getByText(/50\.0K \/ 500\.0K entries/)).toBeInTheDocument();
+      expect(screen.getByText(/50\.0K \/ 500\.0K/)).toBeInTheDocument();
     });
   });
 
@@ -278,11 +284,13 @@ describe('IndexationProgress', () => {
             totalBytes: 2000000000,
             speedGbps: 1.2,
             etaSeconds: 90,
-            entriesProcessed: 3000000,
-            totalEntriesEstimate: 10000000,
-            currentBatch: 2,
+            entriesIndexed: 3000000,
+            totalEntriesEstimated: 10000000,
+            batchesCompleted: 2,
             totalBatches: 7,
             partialFilterAvailable: true,
+            entriesPerSecond: 50000,
+            elapsedSeconds: 60,
           },
         });
       });
@@ -310,11 +318,13 @@ describe('IndexationProgress', () => {
             totalBytes: 2000000000,
             speedGbps: 1.0,
             etaSeconds: 120,
-            entriesProcessed: 1000000,
-            totalEntriesEstimate: 10000000,
-            currentBatch: 1,
+            entriesIndexed: 1000000,
+            totalEntriesEstimated: 10000000,
+            batchesCompleted: 1,
             totalBatches: 7,
             partialFilterAvailable: false,
+            entriesPerSecond: 16667,
+            elapsedSeconds: 60,
           },
         });
       });
@@ -342,17 +352,65 @@ describe('IndexationProgress', () => {
             totalBytes: 2000000000,
             speedGbps: 1.2,
             etaSeconds: 90,
-            entriesProcessed: 3000000,
-            totalEntriesEstimate: 10000000,
-            currentBatch: 2,
+            entriesIndexed: 3000000,
+            totalEntriesEstimated: 10000000,
+            batchesCompleted: 2,
             totalBatches: 7,
             partialFilterAvailable: true,
+            entriesPerSecond: 50000,
+            elapsedSeconds: 60,
           },
         });
       });
 
       const badge = screen.getByText('Partial filtering available').closest('div');
       expect(badge).toHaveAttribute('title', 'You can start filtering now with partial results');
+    });
+  });
+
+  describe('completion notification (Story 6.3 AC6)', () => {
+    it('should show completion toast with statistics', async () => {
+      const toast = await import('react-hot-toast');
+      let completeHandler: ((event: { payload: unknown }) => void) | null = null;
+
+      (listen as Mock).mockImplementation((eventName: string, handler: (event: { payload: unknown }) => void) => {
+        if (eventName === 'indexation-complete') {
+          completeHandler = handler;
+        }
+        return Promise.resolve(() => {});
+      });
+
+      const onComplete = vi.fn();
+      render(<IndexationProgress isIndexing={true} onComplete={onComplete} onError={() => {}} />);
+
+      // Simulate completion event with final statistics
+      await act(async () => {
+        completeHandler?.({
+          payload: {
+            percentage: 100,
+            bytesProcessed: 2000000000,
+            totalBytes: 2000000000,
+            speedGbps: 1.5,
+            etaSeconds: 0,
+            entriesIndexed: 71930527,
+            totalEntriesEstimated: 71930527,
+            batchesCompleted: 1,
+            totalBatches: 1,
+            partialFilterAvailable: true,
+            entriesPerSecond: 301245,
+            elapsedSeconds: 238, // 3:58
+          },
+        });
+      });
+
+      // Should show toast with statistics (AC6)
+      expect(toast.default.success).toHaveBeenCalledWith(
+        expect.stringContaining('Import complete!')
+      );
+      expect(toast.default.success).toHaveBeenCalledWith(
+        expect.stringMatching(/71\.9M entries/)
+      );
+      expect(onComplete).toHaveBeenCalled();
     });
   });
 });

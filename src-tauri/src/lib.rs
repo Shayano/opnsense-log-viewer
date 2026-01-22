@@ -93,6 +93,9 @@ pub fn run() {
             commands::indexation::index_file_with_format,
             commands::indexation::build_hybrid_index,
             commands::indexation::cancel_indexation,
+            // Story 6.3: SQLite-based indexation with real-time progress
+            commands::sqlite_indexation::build_sqlite_index,
+            commands::sqlite_indexation::cancel_sqlite_indexation,
             commands::storage::list_all_indexes,
             commands::storage::delete_index_by_hash,
             commands::storage::check_index_exists, // Story 1.7: Quick index existence check

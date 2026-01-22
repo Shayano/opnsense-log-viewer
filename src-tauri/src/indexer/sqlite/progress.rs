@@ -235,7 +235,8 @@ mod tests {
         assert_eq!(snapshot.entries_parsed, 1000);
         assert_eq!(snapshot.entries_written, 1000);
         assert_eq!(snapshot.errors, 5);
-        assert!(snapshot.elapsed_ms >= 0); // Should have some elapsed time
+        // Elapsed time should be present (any non-negative value is valid for u64)
+        let _ = snapshot.elapsed_ms;
     }
 
     #[test]

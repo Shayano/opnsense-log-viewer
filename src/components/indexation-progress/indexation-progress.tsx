@@ -21,11 +21,13 @@ export function IndexationProgress({ isIndexing, onComplete, onError }: Indexati
     totalBytes: 0,
     speedGbps: 0,
     etaSeconds: 0,
-    entriesProcessed: 0,
-    totalEntriesEstimate: 0,
-    currentBatch: 0,
+    entriesIndexed: 0,
+    totalEntriesEstimated: 0,
+    batchesCompleted: 0,
     totalBatches: 0,
     partialFilterAvailable: false,
+    entriesPerSecond: 0,
+    elapsedSeconds: 0,
   });
 
   // Store actions for progressive loading state
@@ -64,9 +66,13 @@ export function IndexationProgress({ isIndexing, onComplete, onError }: Indexati
       }
     });
 
-    // Listen to completion event
-    const completeUnlisten = listen('indexation-complete', () => {
-      toast.success('Indexation completed successfully');
+    // Listen to completion event (AC6: show final statistics in toast)
+    const completeUnlisten = listen<IndexProgress>('indexation-complete', (event) => {
+      const finalProgress = event.payload;
+      const totalEntries = formatEntries(finalProgress.entriesIndexed);
+      const totalTime = formatElapsed(finalProgress.elapsedSeconds);
+      const avgSpeed = formatEntriesPerSecond(finalProgress.entriesPerSecond);
+      toast.success(`Import complete! ${totalEntries} entries in ${totalTime} (${avgSpeed}/sec)`);
       setIndexProgress(null);
       onComplete();
     });
@@ -89,10 +95,17 @@ export function IndexationProgress({ isIndexing, onComplete, onError }: Indexati
 
   const handleCancel = async () => {
     try {
-      await invoke('cancel_indexation');
+      // Try SQLite cancellation first (Story 6.3), fall back to legacy command
+      await invoke('cancel_sqlite_indexation');
       toast.success('Indexation cancelled');
     } catch (error) {
-      toast.error(`Failed to cancel: ${error}`);
+      // If SQLite cancel not available, try legacy command
+      try {
+        await invoke('cancel_indexation');
+        toast.success('Indexation cancelled');
+      } catch (legacyError) {
+        toast.error(`Failed to cancel: ${legacyError}`);
+      }
     }
   };
 
@@ -103,7 +116,26 @@ export function IndexationProgress({ isIndexing, onComplete, onError }: Indexati
   const formatEta = (seconds: number): string => {
     if (seconds < 60) return `${Math.round(seconds)} seconds`;
     const minutes = Math.floor(seconds / 60);
-    return `${minutes} minute${minutes !== 1 ? 's' : ''}`;
+    const remainingSeconds = Math.round(seconds % 60);
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  // Story 6.3 AC2: Format elapsed time in mm:ss format
+  const formatElapsed = (seconds: number): string => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.round(seconds % 60);
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  // Story 6.3 AC2: Format entries per second with K/M suffixes
+  const formatEntriesPerSecond = (eps: number): string => {
+    if (eps >= 1_000_000) {
+      return `${(eps / 1_000_000).toFixed(1)}M`;
+    }
+    if (eps >= 1_000) {
+      return `${(eps / 1_000).toFixed(0)}K`;
+    }
+    return eps.toString();
   };
 
   const formatEntries = (count: number): string => {
@@ -143,7 +175,7 @@ export function IndexationProgress({ isIndexing, onComplete, onError }: Indexati
             Indexing Log File
           </h2>
           <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-            {progress.percentage}%
+            {Math.round(progress.percentage)}%
           </span>
         </div>
 
@@ -161,22 +193,46 @@ export function IndexationProgress({ isIndexing, onComplete, onError }: Indexati
         )}
 
         <div className="mt-4 space-y-2 text-sm text-gray-600 dark:text-gray-400">
-          {/* Entries progress (Story 6.5 - Task 17.2) */}
-          {progress.totalEntriesEstimate > 0 && (
+          {/* Story 6.3 AC2: Entries progress with count display */}
+          {progress.totalEntriesEstimated > 0 && (
             <div className="flex justify-between">
               <span>Entries:</span>
               <span className="font-mono">
-                {formatEntries(progress.entriesProcessed)} / {formatEntries(progress.totalEntriesEstimate)} entries
+                {formatEntries(progress.entriesIndexed)} / {formatEntries(progress.totalEntriesEstimated)}
               </span>
             </div>
           )}
 
-          {/* Batch progress (Story 6.5 - Task 17.3) */}
+          {/* Story 6.3 AC2: Speed in entries/sec */}
+          {progress.entriesPerSecond > 0 && (
+            <div className="flex justify-between">
+              <span>Speed:</span>
+              <span className="font-mono">{formatEntriesPerSecond(progress.entriesPerSecond)} entries/sec</span>
+            </div>
+          )}
+
+          {/* Story 6.3 AC2: Time elapsed */}
+          {progress.elapsedSeconds > 0 && (
+            <div className="flex justify-between">
+              <span>Elapsed:</span>
+              <span className="font-mono">{formatElapsed(progress.elapsedSeconds)}</span>
+            </div>
+          )}
+
+          {/* Story 6.3 AC2: ETA remaining */}
+          {progress.etaSeconds > 0 && (
+            <div className="flex justify-between">
+              <span>ETA:</span>
+              <span className="font-mono">~{formatEta(progress.etaSeconds)} remaining</span>
+            </div>
+          )}
+
+          {/* Batch progress - only shown when batches are tracked */}
           {progress.totalBatches > 0 && (
             <div className="flex justify-between">
               <span>Batch:</span>
               <span className="font-mono">
-                Batch {progress.currentBatch} / {progress.totalBatches}
+                {progress.batchesCompleted} / {progress.totalBatches}
               </span>
             </div>
           )}
@@ -186,16 +242,6 @@ export function IndexationProgress({ isIndexing, onComplete, onError }: Indexati
             <span className="font-mono">
               {formatBytes(progress.bytesProcessed)} / {formatBytes(progress.totalBytes)}
             </span>
-          </div>
-
-          <div className="flex justify-between">
-            <span>Speed:</span>
-            <span className="font-mono">{progress.speedGbps.toFixed(2)} GB/min</span>
-          </div>
-
-          <div className="flex justify-between">
-            <span>Estimated time remaining:</span>
-            <span className="font-mono">{formatEta(progress.etaSeconds)}</span>
           </div>
         </div>
 

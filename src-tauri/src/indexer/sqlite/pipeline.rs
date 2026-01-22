@@ -526,7 +526,7 @@ mod tests {
         assert!(result.is_ok());
         let stats = result.unwrap();
 
-        // Should have some elapsed time (at least 0ms)
-        assert!(stats.elapsed_ms >= 0);
+        // Elapsed time should be present (any non-negative value is valid for u64)
+        let _ = stats.elapsed_ms;
     }
 }

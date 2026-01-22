@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// Story 6.3: Extended for progressive indexation with early filtering support.
 /// Tracks both byte-level progress and batch-level progress for UI display.
+///
+/// AC4: Extended with entriesPerSecond and elapsedSeconds for SQLite streaming.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexProgress {
@@ -27,6 +29,10 @@ pub struct IndexProgress {
     pub batches_completed: u32,
     /// Story 6.3 AC2: Total number of batches to process
     pub total_batches: u32,
+    /// Story 6.3 AC4: Entries processed per second (from SQLite pipeline)
+    pub entries_per_second: u64,
+    /// Story 6.3 AC4: Elapsed time in seconds since start
+    pub elapsed_seconds: f64,
 }
 
 impl IndexProgress {
@@ -90,6 +96,13 @@ impl IndexProgress {
             0.0
         };
 
+        // Story 6.3 AC4: Calculate entries per second
+        let entries_per_second = if elapsed_seconds > 0.0 {
+            (entries_indexed as f64 / elapsed_seconds) as u64
+        } else {
+            0
+        };
+
         Self {
             percentage,
             bytes_processed,
@@ -101,6 +114,8 @@ impl IndexProgress {
             partial_filter_available,
             batches_completed,
             total_batches,
+            entries_per_second,
+            elapsed_seconds,
         }
     }
 
@@ -234,7 +249,7 @@ mod tests {
         assert_eq!(entries_14gb, 70_000_000);
     }
 
-    /// Story 6.3 AC2: Verify serde camelCase serialization for all new fields
+    /// Story 6.3 AC2/AC4: Verify serde camelCase serialization for all new fields
     #[test]
     fn test_serde_camel_case_serialization() {
         let progress = IndexProgress::with_batch_info(
@@ -261,6 +276,9 @@ mod tests {
         assert!(json.contains("\"partialFilterAvailable\""));
         assert!(json.contains("\"batchesCompleted\""));
         assert!(json.contains("\"totalBatches\""));
+        // Story 6.3 AC4: New fields
+        assert!(json.contains("\"entriesPerSecond\""));
+        assert!(json.contains("\"elapsedSeconds\""));
 
         // Verify NO snake_case keys
         assert!(!json.contains("\"bytes_processed\""));
@@ -270,9 +288,12 @@ mod tests {
         assert!(!json.contains("\"partial_filter_available\""));
         assert!(!json.contains("\"batches_completed\""));
         assert!(!json.contains("\"total_batches\""));
+        // Story 6.3 AC4: No snake_case
+        assert!(!json.contains("\"entries_per_second\""));
+        assert!(!json.contains("\"elapsed_seconds\""));
     }
 
-    /// Story 6.3 AC2: Test deserialization from JSON
+    /// Story 6.3 AC2/AC4: Test deserialization from JSON
     #[test]
     fn test_serde_deserialization() {
         let json = r#"{
@@ -285,7 +306,9 @@ mod tests {
             "totalEntriesEstimated": 10000000,
             "partialFilterAvailable": true,
             "batchesCompleted": 3,
-            "totalBatches": 10
+            "totalBatches": 10,
+            "entriesPerSecond": 83333,
+            "elapsedSeconds": 60.0
         }"#;
 
         let progress: IndexProgress = serde_json::from_str(json).expect("deserialization failed");
@@ -297,5 +320,45 @@ mod tests {
         assert!(progress.partial_filter_available);
         assert_eq!(progress.batches_completed, 3);
         assert_eq!(progress.total_batches, 10);
+        // Story 6.3 AC4: New fields
+        assert_eq!(progress.entries_per_second, 83333);
+        assert!((progress.elapsed_seconds - 60.0).abs() < 0.01);
+    }
+
+    /// Story 6.3 AC4: Test entries_per_second calculation
+    #[test]
+    fn test_entries_per_second_calculation() {
+        let progress = IndexProgress::with_batch_info(
+            500_000_000,
+            1_000_000_000,
+            60.0,           // 60 seconds elapsed
+            300_000,        // 300,000 entries indexed
+            600_000,
+            true,
+            1,
+            2,
+        );
+
+        // 300,000 entries / 60 seconds = 5,000 entries/sec
+        assert_eq!(progress.entries_per_second, 5000);
+        assert!((progress.elapsed_seconds - 60.0).abs() < 0.01);
+    }
+
+    /// Story 6.3 AC4: Test entries_per_second with zero elapsed time
+    #[test]
+    fn test_entries_per_second_zero_elapsed() {
+        let progress = IndexProgress::with_batch_info(
+            0,
+            1_000_000_000,
+            0.0, // Zero elapsed time
+            0,
+            600_000,
+            false,
+            0,
+            2,
+        );
+
+        assert_eq!(progress.entries_per_second, 0);
+        assert!((progress.elapsed_seconds - 0.0).abs() < 0.01);
     }
 }

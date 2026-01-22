@@ -73,6 +73,7 @@ export interface SourceFileMetadata {
 /**
  * Progress data during indexation (from Rust backend)
  * Extended with batch tracking fields from Story 6.3 progressive indexation
+ * Story 6.3 AC4: Extended with entriesPerSecond and elapsedSeconds for SQLite streaming
  */
 export interface IndexProgress {
   /** Percentage complete (0-100) */
@@ -85,16 +86,40 @@ export interface IndexProgress {
   speedGbps: number;
   /** Estimated seconds remaining */
   etaSeconds: number;
-  /** Number of entries processed so far */
-  entriesProcessed: number;
+  /** Number of entries indexed so far */
+  entriesIndexed: number;
   /** Estimated total entries (refined as indexation progresses) */
-  totalEntriesEstimate: number;
-  /** Current batch number being processed */
-  currentBatch: number;
+  totalEntriesEstimated: number;
+  /** Number of batches completed */
+  batchesCompleted: number;
   /** Total number of batches */
   totalBatches: number;
   /** True when first batch completes - filtering can begin */
   partialFilterAvailable: boolean;
+  /** Story 6.3 AC4: Entries processed per second */
+  entriesPerSecond: number;
+  /** Story 6.3 AC4: Elapsed time in seconds */
+  elapsedSeconds: number;
+}
+
+/**
+ * Metadata returned after SQLite index building (Story 6.3)
+ */
+export interface SqliteIndexMetadata {
+  /** Total entries successfully indexed */
+  entryCount: number;
+  /** Total time elapsed in milliseconds */
+  elapsedMs: number;
+  /** Processing speed in entries per second */
+  entriesPerSecond: number;
+  /** Bytes processed from source file */
+  bytesProcessed: number;
+  /** Bytes per second throughput */
+  bytesPerSecond: number;
+  /** File hash for cache identification */
+  fileHash: string;
+  /** Detected log format */
+  format: string;
 }
 
 /**
