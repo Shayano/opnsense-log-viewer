@@ -91,6 +91,23 @@ impl HybridIndex {
         }
     }
 
+    /// Create HybridIndex from a HotIndex (used for cache restoration)
+    ///
+    /// Story 6.4 Bug Fix: When loading from cache, we need to populate
+    /// the HYBRID_INDEX with the cached data so queries work correctly.
+    pub fn from_hot_index(
+        hot: crate::indexer::tiered::HotIndex,
+        metadata: Option<IndexMetadata>,
+    ) -> Self {
+        Self {
+            inverted_index: hot.inverted_index,
+            bitmap_index: hot.bitmap_index,
+            offset_table: hot.offset_table,
+            metadata,
+            cancellation_token: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
     // Story 1.7: Removed duplicate calculate_file_hash - use crate::storage::calculate_file_hash instead
 
     /// Build index from a log file with progress callback

@@ -1,5 +1,6 @@
 import React, { useRef, useState, useMemo, useCallback, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import type { LogEntry } from '@/types/log-entry';
 import { LogTableHeader, type SortColumn, type SortDirection } from './log-table-header';
 import { LogTableRow } from './log-table-row';
@@ -7,6 +8,10 @@ import { ContextMenu } from './context-menu';
 import { useResponsiveColumns } from './use-responsive-columns';
 import { EntryDetailView } from '@/components/entry-detail-view';
 import { enrichRuleLabels, enrichAliases } from '@/services/enrichment-service';
+
+// Page size options (descending order for dropdown)
+const PAGE_SIZE_OPTIONS = [5000, 2000, 1000, 500, 100] as const;
+const DEFAULT_PAGE_SIZE = 1000;
 
 interface LogTableProps {
   entries: LogEntry[];
@@ -43,6 +48,10 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
     entry: null,
   });
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+
   const columnVisibility = useResponsiveColumns();
 
   // Sort entries based on current sort state
@@ -68,9 +77,39 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
     return sorted;
   }, [entries, sortColumn, sortDirection]);
 
-  // TanStack Virtual setup
+  // Pagination calculations
+  const totalPages = Math.ceil(sortedEntries.length / pageSize);
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, sortedEntries.length);
+
+  // Get paginated entries
+  const paginatedEntries = useMemo(() => {
+    return sortedEntries.slice(startIndex, endIndex);
+  }, [sortedEntries, startIndex, endIndex]);
+
+  // Reset to page 1 when entries change (new filter applied)
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [entries]);
+
+  // Reset to page 1 when page size changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [pageSize]);
+
+  // Pagination handlers
+  const goToFirstPage = useCallback(() => setCurrentPage(1), []);
+  const goToLastPage = useCallback(() => setCurrentPage(totalPages), [totalPages]);
+  const goToPreviousPage = useCallback(() => setCurrentPage((p) => Math.max(1, p - 1)), []);
+  const goToNextPage = useCallback(() => setCurrentPage((p) => Math.min(totalPages, p + 1)), [totalPages]);
+
+  const handlePageSizeChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPageSize(Number(e.target.value));
+  }, []);
+
+  // TanStack Virtual setup - uses paginated entries
   const rowVirtualizer = useVirtualizer({
-    count: sortedEntries.length,
+    count: paginatedEntries.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 32, // Row height in pixels
     overscan: 10, // Render 10 extra rows above/below viewport
@@ -91,13 +130,13 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
   const handleRowSelect = useCallback(
     (index: number): void => {
       setSelectedRowIndex(index);
-      setSelectedEntry(sortedEntries[index]);
+      setSelectedEntry(paginatedEntries[index]);
       setDetailPaneOpen(true);
       if (onRowSelect) {
-        onRowSelect(sortedEntries[index]);
+        onRowSelect(paginatedEntries[index]);
       }
     },
-    [onRowSelect, sortedEntries]
+    [onRowSelect, paginatedEntries]
   );
 
   const handleCloseDetailPane = useCallback((): void => {
@@ -143,13 +182,13 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
           event.preventDefault();
           setSelectedRowIndex((prev) => {
             if (prev === null) return 0;
-            return Math.min(sortedEntries.length - 1, (prev ?? -1) + 1);
+            return Math.min(paginatedEntries.length - 1, (prev ?? -1) + 1);
           });
           break;
 
         case 'Enter':
           if (selectedRowIndex !== null && onRowSelect) {
-            onRowSelect(sortedEntries[selectedRowIndex]);
+            onRowSelect(paginatedEntries[selectedRowIndex]);
           }
           break;
 
@@ -166,7 +205,7 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
         element.removeEventListener('keydown', handleKeyDown);
       };
     }
-  }, [selectedRowIndex, sortedEntries, onRowSelect]);
+  }, [selectedRowIndex, paginatedEntries, onRowSelect]);
 
   // Scroll to selected row when navigating with keyboard
   useEffect(() => {
@@ -177,45 +216,31 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
     }
   }, [selectedRowIndex, rowVirtualizer]);
 
-  // Auto-enrich rule labels when entries change (Story 3.3)
+  // Auto-enrich rule labels when paginated entries change (Story 3.3)
+  // Only enriches the visible page for performance
   useEffect(() => {
-    console.log('[MEM] LogTable: useEffect triggered for rule labels', {
-      entriesLength: entries.length,
-      hasEntries: entries.length > 0
-    });
-
-    if (entries.length > 0) {
+    if (paginatedEntries.length > 0) {
       const DEBOUNCE_ENRICHMENT_MS = 500;
       const timeoutId = setTimeout(() => {
-        console.log('[MEM] LogTable: enrichRuleLabels about to call', { entriesCount: entries.length });
-        enrichRuleLabels(entries);
+        enrichRuleLabels(paginatedEntries);
       }, DEBOUNCE_ENRICHMENT_MS);
 
       return () => clearTimeout(timeoutId);
-    } else {
-      console.log('[MEM] LogTable: no entries to enrich for rule labels');
     }
-  }, [entries]);
+  }, [paginatedEntries]);
 
-  // Auto-enrich IP aliases when entries change (Story 3.4)
+  // Auto-enrich IP aliases when paginated entries change (Story 3.4)
+  // Only enriches the visible page for performance
   useEffect(() => {
-    console.log('[MEM] LogTable: useEffect triggered for aliases', {
-      entriesLength: entries.length,
-      hasEntries: entries.length > 0
-    });
-
-    if (entries.length > 0) {
+    if (paginatedEntries.length > 0) {
       const DEBOUNCE_ENRICHMENT_MS = 500;
       const timeoutId = setTimeout(() => {
-        console.log('[MEM] LogTable: enrichAliases about to call', { entriesCount: entries.length });
-        enrichAliases(entries);
+        enrichAliases(paginatedEntries);
       }, DEBOUNCE_ENRICHMENT_MS);
 
       return () => clearTimeout(timeoutId);
-    } else {
-      console.log('[MEM] LogTable: no entries to enrich for aliases');
     }
-  }, [entries]);
+  }, [paginatedEntries]);
 
   return (
     <div className="flex flex-col h-full">
@@ -235,7 +260,7 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
         aria-label="Log entries table"
         tabIndex={0}
       >
-        {sortedEntries.length === 0 ? (
+        {paginatedEntries.length === 0 ? (
           <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400">
             No log entries to display
           </div>
@@ -251,7 +276,7 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
               <LogTableRow
                 key={virtualRow.key}
                 virtualRow={virtualRow}
-                entry={sortedEntries[virtualRow.index]}
+                entry={paginatedEntries[virtualRow.index]}
                 isSelected={selectedRowIndex === virtualRow.index}
                 onSelect={() => handleRowSelect(virtualRow.index)}
                 onContextMenu={handleContextMenu}
@@ -262,10 +287,82 @@ export function LogTable({ entries, onFilterByValue, onRowSelect }: LogTableProp
         )}
       </div>
 
-      {/* Footer: Total count */}
-      <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-2 text-sm text-gray-600 dark:text-gray-400">
-        Showing {sortedEntries.length.toLocaleString()} entries
-        {selectedRowIndex !== null && ` | Row ${selectedRowIndex + 1} selected`}
+      {/* Footer: Pagination Controls */}
+      <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-2 flex items-center justify-between text-sm">
+        {/* Left: Entry count info */}
+        <div className="text-gray-600 dark:text-gray-400">
+          Showing {startIndex + 1}-{endIndex} of {sortedEntries.length.toLocaleString()} entries
+          {selectedRowIndex !== null && ` | Row ${selectedRowIndex + 1} selected`}
+        </div>
+
+        {/* Right: Pagination controls */}
+        <div className="flex items-center gap-4">
+          {/* Page size selector */}
+          <div className="flex items-center gap-2">
+            <label htmlFor="pageSize" className="text-gray-600 dark:text-gray-400">
+              Per page:
+            </label>
+            <select
+              id="pageSize"
+              value={pageSize}
+              onChange={handlePageSizeChange}
+              className="px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded
+                bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100
+                focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size.toLocaleString()}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Page navigation */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={goToFirstPage}
+              disabled={currentPage === 1}
+              className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="First page"
+              aria-label="Go to first page"
+            >
+              <ChevronsLeft className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+            </button>
+            <button
+              onClick={goToPreviousPage}
+              disabled={currentPage === 1}
+              className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Previous page"
+              aria-label="Go to previous page"
+            >
+              <ChevronLeft className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+            </button>
+
+            <span className="px-3 text-gray-600 dark:text-gray-400">
+              Page {currentPage} of {totalPages || 1}
+            </span>
+
+            <button
+              onClick={goToNextPage}
+              disabled={currentPage >= totalPages}
+              className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Next page"
+              aria-label="Go to next page"
+            >
+              <ChevronRight className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+            </button>
+            <button
+              onClick={goToLastPage}
+              disabled={currentPage >= totalPages}
+              className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Last page"
+              aria-label="Go to last page"
+            >
+              <ChevronsRight className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Context Menu */}

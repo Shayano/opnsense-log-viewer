@@ -100,7 +100,6 @@ export function FilterSidebar(): JSX.Element {
         setEntriesLoading(true);
         try {
           const ids = result.entryIds.slice(0, 20_000);
-          console.log('[MEM] filter-sidebar: invoking get_entries_by_ids', { idsCount: ids.length });
           const dtos = await invoke<Array<{
             id: string;
             timestamp: string;
@@ -112,7 +111,7 @@ export function FilterSidebar(): JSX.Element {
             protocol: string;
             action: string;
             ruleLabel: string;
-          }>>('get_entries_by_ids', { entry_ids: ids });
+          }>>('get_entries_by_ids', { entryIds: ids });
           const entries: LogEntry[] = dtos.map((d) => ({
             id: d.id,
             timestamp: d.timestamp,
@@ -125,9 +124,6 @@ export function FilterSidebar(): JSX.Element {
             action: (d.action as Action) || Action.PASS,
             ruleLabel: d.ruleLabel,
           }));
-          console.log('[MEM] filter-sidebar: get_entries_by_ids returned, setting entries', {
-            entriesCount: entries.length,
-          });
           setCurrentEntries(entries);
         } catch (fetchErr) {
           setCurrentEntries([]);

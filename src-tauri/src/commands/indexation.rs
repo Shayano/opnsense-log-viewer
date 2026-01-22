@@ -324,31 +324,36 @@ pub async fn build_hybrid_index(
             reason: None,
         });
 
+        // Calculate hash for metadata
+        let source_hash = crate::indexer::calculate_file_hash(&canonical_path)
+            .map(|h| hex::encode(h))
+            .unwrap_or_else(|_| "unknown".to_string());
+
         // Store cached index in global state for queries
         // Convert TieredIndex HotIndex back to HybridIndex for compatibility with existing query system
         {
             let mut guard = HYBRID_INDEX.lock().unwrap();
 
-            // Create HybridIndex from cached TieredIndex's hot tier components
+            // Bug Fix: Create HybridIndex from cached HotIndex data instead of empty index
             // This ensures queries work correctly after cache hit
-            let mut hybrid_index = HybridIndex::new();
+            let index_metadata = crate::indexer::IndexMetadata {
+                format: detected_format,
+                entry_count: tiered_index.total_entries,
+                created_at: chrono::Utc::now(),
+                source_file_path: canonical_path.to_string_lossy().to_string(),
+                source_file_size: fs::metadata(&canonical_path).map(|m| m.len()).unwrap_or(0),
+                source_file_hash: source_hash.clone(),
+            };
 
-            // The HybridIndex internal fields are private, so we need to rebuild it
-            // by using the public build mechanism or exposing setters
-            // For now, log the cache hit and note that full TieredIndex query integration
-            // will be completed in Story 6.5/6.6 when the query layer is updated
+            let hybrid_index = HybridIndex::from_hot_index(tiered_index.hot, Some(index_metadata));
+
             log::info!(
-                "[MEM] build_hybrid_index: cache hit with {} entries. Note: Query integration pending Story 6.5/6.6",
+                "[MEM] build_hybrid_index: cache hit restored {} entries into HYBRID_INDEX",
                 tiered_index.total_entries
             );
 
             *guard = Some(hybrid_index);
         }
-
-        // Calculate hash for metadata
-        let source_hash = crate::indexer::calculate_file_hash(&canonical_path)
-            .map(|h| hex::encode(h))
-            .unwrap_or_else(|_| "unknown".to_string());
 
         // Emit completion event
         let metadata = crate::indexer::IndexMetadata {
