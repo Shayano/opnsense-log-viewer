@@ -13,18 +13,12 @@ use crate::indexer::bitmap::BitmapIndex;
 use crate::indexer::offset_table::OffsetTable;
 use crate::indexer::progress::IndexProgress;
 use crate::indexer::parallel::build_index_parallel;
-use crate::indexer::streaming::build_index_streaming;
 use crate::parser::{csv_filterlog, rfc3164, rfc5424};
 use crate::types::log_entry::LogFormat;
 
 /// Threshold for switching to parallel indexing (100 MB)
 /// Files larger than this will use multi-threaded processing
 const PARALLEL_THRESHOLD: u64 = 100 * 1024 * 1024;
-
-/// Threshold for switching to streaming indexing (1 GB)
-/// Files larger than this will use batch processing to limit memory usage
-/// Story 6.1: Memory-efficient indexing for large files
-const STREAMING_THRESHOLD: u64 = 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -91,33 +85,16 @@ impl HybridIndex {
         }
     }
 
-    /// Create HybridIndex from a HotIndex (used for cache restoration)
-    ///
-    /// Story 6.4 Bug Fix: When loading from cache, we need to populate
-    /// the HYBRID_INDEX with the cached data so queries work correctly.
-    pub fn from_hot_index(
-        hot: crate::indexer::tiered::HotIndex,
-        metadata: Option<IndexMetadata>,
-    ) -> Self {
-        Self {
-            inverted_index: hot.inverted_index,
-            bitmap_index: hot.bitmap_index,
-            offset_table: hot.offset_table,
-            metadata,
-            cancellation_token: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
     // Story 1.7: Removed duplicate calculate_file_hash - use crate::storage::calculate_file_hash instead
 
     /// Build index from a log file with progress callback
     ///
     /// Automatically selects indexing strategy based on file size:
-    /// - Files > 1 GB: Use STREAMING batch processing (memory-efficient, ~2GB peak)
     /// - Files > 100 MB: Use parallel multi-threaded processing (rayon + mmap)
     /// - Smaller files: Use sequential processing (lower overhead)
     ///
-    /// Story 6.1: Added streaming mode for large files to reduce memory from 23GB to ~2GB
+    /// Story 6.5: Removed streaming mode - SQLite-based indexation (Story 6.1-6.4) is now
+    /// the recommended approach for large files, providing better performance and query capabilities.
     pub fn build_index<P, F>(
         &mut self,
         file_path: P,
@@ -138,15 +115,7 @@ impl HybridIndex {
         let source_hash = hex::encode(source_hash_bytes);
 
         // Choose indexing strategy based on file size
-        // Story 6.1: Files > 1GB use streaming to limit memory to ~2GB
-        if file_size > STREAMING_THRESHOLD {
-            log::info!(
-                "[PERF] File size {} MB > streaming threshold {} MB, using STREAMING indexing (memory-efficient)",
-                file_size / (1024 * 1024),
-                STREAMING_THRESHOLD / (1024 * 1024)
-            );
-            self.build_index_streaming(file_path, format, file_size, source_hash, progress_callback)
-        } else if file_size > PARALLEL_THRESHOLD {
+        if file_size > PARALLEL_THRESHOLD {
             log::info!(
                 "[PERF] File size {} MB > parallel threshold {} MB, using PARALLEL indexing",
                 file_size / (1024 * 1024),
@@ -161,43 +130,6 @@ impl HybridIndex {
             );
             self.build_index_sequential(file_path, format, file_size, source_hash, progress_callback)
         }
-    }
-
-    /// Build index using streaming batch processing (memory-efficient for large files)
-    /// Story 6.1: Processes in 100-chunk batches, persists to disk, frees memory
-    fn build_index_streaming<P, F>(
-        &mut self,
-        file_path: P,
-        format: LogFormat,
-        file_size: u64,
-        source_hash: String,
-        progress_callback: F,
-    ) -> Result<IndexMetadata, IndexError>
-    where
-        P: AsRef<Path>,
-        F: FnMut(IndexProgress),
-    {
-        let (inverted, bitmap, offset_table, metadata) = build_index_streaming(
-            file_path,
-            format,
-            file_size,
-            source_hash,
-            self.cancellation_token.clone(),
-            progress_callback,
-        )?;
-
-        self.inverted_index = inverted;
-        self.bitmap_index = bitmap;
-        self.offset_table = offset_table;
-        self.metadata = Some(metadata.clone());
-
-        log::info!(
-            "[MEM] HybridIndex::build_index_streaming: done entry_count={} memory_usage≈{} bytes",
-            metadata.entry_count,
-            self.memory_usage()
-        );
-
-        Ok(metadata)
     }
 
     /// Build index using parallel multi-threaded processing

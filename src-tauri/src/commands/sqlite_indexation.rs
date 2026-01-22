@@ -30,7 +30,7 @@ use crate::indexer::sqlite::{
 use crate::indexer::progress::IndexProgress;
 use crate::parser::detect_format;
 use crate::types::log_entry::LogFormat;
-use crate::indexer::cache::calculate_file_hash;
+use crate::storage::calculate_file_hash_quick;
 
 use super::progress_emitter::ProgressEmitter;
 use super::sqlite_query::set_sqlite_pool;
@@ -112,8 +112,8 @@ pub async fn build_sqlite_index(
         }
     };
 
-    // 4. Calculate file hash
-    let file_hash = calculate_file_hash(&path)
+    // 4. Calculate file hash (Story 6.5: migrated to storage module)
+    let file_hash = calculate_file_hash_quick(&path)
         .map_err(|e| format!("Failed to calculate file hash: {}", e))?;
     let file_hash_hex = hex::encode(&file_hash);
 

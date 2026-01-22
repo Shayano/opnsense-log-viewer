@@ -8,6 +8,6 @@ pub mod persistence;
 pub mod paths;
 
 // Re-export public APIs
-pub use integrity::{calculate_checksum, calculate_file_hash, verify_checksum, IntegrityError};
+pub use integrity::{calculate_checksum, calculate_file_hash, calculate_file_hash_quick, verify_checksum, IntegrityError};
 pub use persistence::{load_index, save_index, PersistenceError};
 pub use paths::{get_index_path, get_indexes_dir, PathError};

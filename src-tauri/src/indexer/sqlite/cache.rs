@@ -26,8 +26,8 @@ use tauri::AppHandle;
 use thiserror::Error;
 
 use crate::storage::paths::{get_indexes_dir, PathError};
+use crate::storage::{calculate_file_hash_quick, IntegrityError};
 use crate::indexer::hybrid::IndexError;
-use crate::indexer::cache::calculate_file_hash;
 use super::pool::{SqliteConnectionPool, PoolError, DEFAULT_READ_POOL_SIZE};
 
 /// Errors that can occur during SQLite cache operations
@@ -53,6 +53,9 @@ pub enum SqliteCacheError {
 
     #[error("Index error: {0}")]
     IndexError(#[from] IndexError),
+
+    #[error("Integrity error: {0}")]
+    IntegrityError(#[from] IntegrityError),
 }
 
 /// Get or create a SQLite database for a log file
@@ -80,9 +83,9 @@ pub fn get_or_create_database(
         ));
     }
 
-    // Calculate file hash using existing shared function from indexer/cache.rs
-    // Story 6.1 Dev Notes: Code Reuse - CRITICAL - use existing calculate_file_hash
-    let file_hash = calculate_file_hash(file_path)?;
+    // Calculate file hash using shared function from storage::integrity
+    // Story 6.5: Migrated from indexer/cache.rs to storage/integrity.rs
+    let file_hash = calculate_file_hash_quick(file_path)?;
     let file_hash_hex = hex::encode(&file_hash);
 
     // Get database path
@@ -212,8 +215,7 @@ fn validate_existing_database(db_path: &Path, expected_hash: &str) -> Result<boo
     }
 }
 
-// Note: calculate_file_hash is imported from crate::indexer::cache
-// Story 6.1 Dev Notes: Code Reuse - CRITICAL - DO NOT reinvent file hash calculation
+// Story 6.5: calculate_file_hash_quick is now in crate::storage::integrity
 
 /// Clear all SQLite database caches
 ///
@@ -268,7 +270,7 @@ pub fn delete_database_for_file(
         ));
     }
 
-    let file_hash = calculate_file_hash(file_path)?;
+    let file_hash = calculate_file_hash_quick(file_path)?;
     let file_hash_hex = hex::encode(&file_hash);
     let db_path = get_sqlite_database_path(app_handle, &file_hash_hex)?;
 
@@ -292,8 +294,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    // Note: Hash calculation tests are in crate::indexer::cache::tests
-    // We reuse the shared calculate_file_hash function, so no duplicate tests needed
+    // Story 6.5: Hash calculation tests are in storage::integrity::tests
 
     #[test]
     fn test_validate_existing_database_valid() {

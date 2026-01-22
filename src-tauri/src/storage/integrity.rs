@@ -113,6 +113,65 @@ pub fn verify_checksum(data: &[u8], expected: &[u8; 32]) -> Result<(), Integrity
     Ok(())
 }
 
+/// Chunk size for quick file hash calculation (1 MB)
+const QUICK_HASH_CHUNK_SIZE: u64 = 1024 * 1024;
+
+/// Calculate efficient file hash for cache lookup (quick mode)
+///
+/// Story 6.5: Migrated from indexer/cache.rs during dependency cleanup.
+/// Uses SHA256 on (first 1MB + last 1MB + file size) for fast hash
+/// calculation that still uniquely identifies file content.
+///
+/// # Performance
+/// - Completes in <1 second for any file size
+/// - Reads at most 2MB from disk regardless of file size
+///
+/// # Arguments
+/// * `path` - Path to the file to hash
+///
+/// # Returns
+/// * `Ok([u8; 32])` - SHA256 hash
+/// * `Err(IntegrityError)` - IO error
+pub fn calculate_file_hash_quick<P: AsRef<Path>>(path: P) -> Result<[u8; 32], IntegrityError> {
+    use std::io::{BufReader, Read as _, Seek, SeekFrom};
+
+    let file = File::open(path)?;
+    let file_size = file.metadata()?.len();
+    let mut reader = BufReader::with_capacity(64 * 1024, file);
+    let mut hasher = Sha256::new();
+
+    if file_size <= 2 * QUICK_HASH_CHUNK_SIZE {
+        // Small file: hash entire content
+        let mut content = Vec::with_capacity(file_size as usize);
+        reader.read_to_end(&mut content)?;
+        hasher.update(&content);
+    } else {
+        // Large file: hash first 1MB + last 1MB
+
+        // Read first 1MB
+        let mut first_chunk = vec![0u8; QUICK_HASH_CHUNK_SIZE as usize];
+        reader.read_exact(&mut first_chunk)?;
+        hasher.update(&first_chunk);
+
+        // Seek to last 1MB
+        reader.seek(SeekFrom::End(-(QUICK_HASH_CHUNK_SIZE as i64)))?;
+
+        // Read last 1MB
+        let mut last_chunk = vec![0u8; QUICK_HASH_CHUNK_SIZE as usize];
+        reader.read_exact(&mut last_chunk)?;
+        hasher.update(&last_chunk);
+    }
+
+    // Include file size in hash
+    hasher.update(&file_size.to_le_bytes());
+
+    let result = hasher.finalize();
+    let mut hash = [0u8; 32];
+    hash.copy_from_slice(&result[..]);
+
+    Ok(hash)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

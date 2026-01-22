@@ -3,11 +3,10 @@ use crate::types::persisted_index::{PersistedIndex, SourceFileMetadata};
 use crate::types::{FileMetadata, IndexMetadata};
 use crate::parser::{detect_format, parse_file_streaming};
 use crate::types::log_entry::LogFormat;
-use crate::indexer::{HybridIndex, IndexProgress, IndexCache, IndexCacheEvent};
+use crate::indexer::{HybridIndex, IndexProgress};
 use std::fs;
 use std::path::Path;
-use std::time::Instant;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 /// Get file metadata (size)
 #[tauri::command]
@@ -243,7 +242,10 @@ pub async fn index_file_with_format(
 use super::query::HYBRID_INDEX;
 
 /// Build hybrid index (Story 1.3) - with progress events
-/// Story 6.4: Added persistent cache for instant reload (<500ms)
+///
+/// Story 6.5: Removed rkyv-based cache system. For large files requiring instant reload,
+/// use the SQLite-based indexation commands (build_sqlite_index) which provide better
+/// performance and query capabilities.
 #[tauri::command]
 pub async fn build_hybrid_index(
     app: AppHandle,
@@ -292,114 +294,6 @@ pub async fn build_hybrid_index(
         }
     };
 
-    // Story 6.4: Check cache first (fast path <500ms)
-    let cache_dir = app.path().app_data_dir()
-        .map_err(|e| format!("Failed to get app data directory: {}", e))?;
-    let cache = IndexCache::new(cache_dir);
-
-    let cache_start = Instant::now();
-    let cache_result = cache.get_cached_index(&canonical_path);
-    let cache_lookup_time = cache_start.elapsed();
-
-    if let Ok(Some((tiered_index, cache_metadata))) = cache_result {
-        // Cache hit! Load from cache
-        let cache_age = cache.get_cache_age(&canonical_path)
-            .ok()
-            .flatten()
-            .unwrap_or(0);
-
-        log::info!(
-            "[CACHE] Cache hit for {}: {} entries loaded in {:.2}ms (age: {}s)",
-            canonical_path.display(),
-            tiered_index.total_entries,
-            cache_lookup_time.as_secs_f64() * 1000.0,
-            cache_age
-        );
-
-        // Emit cache-hit event
-        let _ = app.emit("index-cache-hit", IndexCacheEvent {
-            file_path: canonical_path.to_string_lossy().to_string(),
-            cache_hit: true,
-            cache_age_seconds: Some(cache_age),
-            reason: None,
-        });
-
-        // Calculate hash for metadata
-        let source_hash = crate::indexer::calculate_file_hash(&canonical_path)
-            .map(|h| hex::encode(h))
-            .unwrap_or_else(|_| "unknown".to_string());
-
-        // Store cached index in global state for queries
-        // Convert TieredIndex HotIndex back to HybridIndex for compatibility with existing query system
-        {
-            let mut guard = HYBRID_INDEX.lock().unwrap();
-
-            // Bug Fix: Create HybridIndex from cached HotIndex data instead of empty index
-            // This ensures queries work correctly after cache hit
-            let index_metadata = crate::indexer::IndexMetadata {
-                format: detected_format,
-                entry_count: tiered_index.total_entries,
-                created_at: chrono::Utc::now(),
-                source_file_path: canonical_path.to_string_lossy().to_string(),
-                source_file_size: fs::metadata(&canonical_path).map(|m| m.len()).unwrap_or(0),
-                source_file_hash: source_hash.clone(),
-            };
-
-            let hybrid_index = HybridIndex::from_hot_index(tiered_index.hot, Some(index_metadata));
-
-            log::info!(
-                "[MEM] build_hybrid_index: cache hit restored {} entries into HYBRID_INDEX",
-                tiered_index.total_entries
-            );
-
-            *guard = Some(hybrid_index);
-        }
-
-        // Emit completion event
-        let metadata = crate::indexer::IndexMetadata {
-            format: detected_format,
-            entry_count: tiered_index.total_entries,
-            created_at: chrono::Utc::now(),
-            source_file_path: canonical_path.to_string_lossy().to_string(),
-            source_file_size: fs::metadata(&canonical_path).map(|m| m.len()).unwrap_or(0),
-            source_file_hash: source_hash.clone(),
-        };
-        let _ = app.emit("indexation-complete", &metadata);
-
-        // Return metadata for cache hit
-        return Ok(IndexMetadata {
-            source_file_hash: source_hash,
-            entry_count: cache_metadata.entry_count,
-            format: format_str.to_string(),
-            index_size_bytes: 0,
-            created_at: chrono::DateTime::from_timestamp(cache_metadata.created_at, 0)
-                .unwrap_or_else(chrono::Utc::now)
-                .to_rfc3339(),
-            parsing_stats: None,
-        });
-    }
-
-    // Cache miss - emit event and proceed with full indexation
-    let miss_reason = match &cache_result {
-        Ok(None) => "cache file not found".to_string(),
-        Err(e) => format!("cache lookup failed: {}", e),
-        _ => "unknown".to_string(),
-    };
-
-    log::info!(
-        "[CACHE] Cache miss for {}: {} (lookup took {:.2}ms)",
-        canonical_path.display(),
-        miss_reason,
-        cache_lookup_time.as_secs_f64() * 1000.0
-    );
-
-    let _ = app.emit("index-cache-miss", IndexCacheEvent {
-        file_path: canonical_path.to_string_lossy().to_string(),
-        cache_hit: false,
-        cache_age_seconds: None,
-        reason: Some(miss_reason),
-    });
-
     // 4. Create hybrid index
     let hybrid_index = HybridIndex::new();
 
@@ -444,7 +338,7 @@ pub async fn build_hybrid_index(
                 metadata.entry_count
             );
 
-            // NEW Story 1.4: Save index to disk
+            // Save index to disk (bincode + zstd compression)
             let save_result = (|| -> Result<(), String> {
                 // Calculate source file hash (bytes)
                 let source_hash_bytes = hex::decode(&metadata.source_file_hash)
@@ -488,46 +382,6 @@ pub async fn build_hybrid_index(
 
             if let Err(e) = save_result {
                 log::warn!("Failed to save index: {}", e);
-                // Continue anyway - indexation succeeded
-            }
-
-            // Story 6.4: Save to TieredIndex cache for instant reload
-            let cache_save_result = (|| -> Result<(), String> {
-                use crate::indexer::tiered::{TieredIndex, TieredConfig, HotIndex};
-
-                // Get index from global state to convert to TieredIndex
-                let guard = HYBRID_INDEX.lock().unwrap();
-                let hybrid_index = guard.as_ref()
-                    .ok_or("Index not found in global state")?;
-
-                // Create TieredIndex from HybridIndex components
-                let tiered_index = TieredIndex {
-                    config: TieredConfig::default(),
-                    hot: HotIndex::from_indexes(
-                        hybrid_index.inverted_index().clone(),
-                        hybrid_index.bitmap_index().clone(),
-                        hybrid_index.offset_table().clone(),
-                        0,
-                        metadata.entry_count,
-                    ),
-                    warm: Vec::new(),
-                    total_entries: metadata.entry_count,
-                };
-
-                // Save to cache
-                cache.save_index(&canonical_path, &tiered_index)
-                    .map_err(|e| format!("Failed to save to cache: {}", e))?;
-
-                log::info!(
-                    "[CACHE] Saved {} entries to cache for instant reload",
-                    metadata.entry_count
-                );
-
-                Ok(())
-            })();
-
-            if let Err(e) = cache_save_result {
-                log::warn!("Failed to save to cache: {}", e);
                 // Continue anyway - indexation succeeded
             }
 
