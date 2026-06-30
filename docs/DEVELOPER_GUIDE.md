@@ -26,7 +26,8 @@ python -m opnsense_log_viewer
 ### Prerequisites
 - Python 3.8+
 - tkinter (usually included with Python)
-- No external dependencies for core functionality
+- `duckdb` (fast filter engine) and `paramiko` (SSH rule-label fetch); install with
+  `pip install -r requirements.txt`
 
 ### Installing in Development Mode
 ```bash
@@ -344,8 +345,8 @@ def process_entry(entry: LogEntry, options: Dict[str, Any]) -> bool:
 
 The project ships a pytest suite under `tests/` (run with `python -m pytest`).
 When adding features, add or update tests under `tests/unit/` and
-`tests/integration/`; the SQLite filter engine in particular is validated by a
-semantic cross-check against a Python reference (`tests/unit/test_sqlite_index.py`).
+`tests/integration/`; the DuckDB filter engine in particular is validated by a
+semantic cross-check against the parser reference (`tests/unit/test_duckdb_filter.py`).
 
 ### Unit Tests
 ```python
@@ -431,16 +432,22 @@ python -m opnsense_log_viewer
 - Default cache size: 50 chunks
 - Adjust in `constants/app_constants.py` if needed
 
-### Filtering (persistent SQLite index)
-- On first filter, each file is parsed once into an on-disk SQLite index
-  (`services/sqlite_index.py`); subsequent filters run as SQL queries instead of
-  re-parsing the file
-- The index is cached per file (keyed by a quick file fingerprint) and reused
-  across sessions, so re-opening a large file is near-instant
-- The special `interface` (physical + logical name) and `__label__` (rule
-  description) filters are resolved in Python at query time, so the index never
-  needs rebuilding when the interface mapping or rule labels change
+### Filtering (DuckDB engine)
+- Filters are answered by `services/duckdb_filter.py` (`DuckDBLogFilter`), which
+  reads the raw log with DuckDB's compiled, multi-threaded CSV engine and filters
+  it in place. There is NO persistent index to build, so the first filter on a
+  14 GB file completes in tens of seconds and there is no cache to invalidate
+- The file is read as a single `line` column; every field is extracted on demand
+  with `split_part()` plus a `CASE WHEN ipversion='6'` for the version-dependent
+  fields, mirroring `OPNsenseLogParser._parse_fields` (IPv4 and IPv6) exactly
+- `FilterCondition`/`FilterExpression` are translated to a DuckDB `WHERE` (left-to-
+  right fold, per-condition negation). The special `interface` (physical + logical
+  name) and `__label__` (rule description) filters are resolved in Python against
+  the current mappings, so nothing has to be rebuilt when they change
+- A filter materializes only the matching rows (raw line + resolved display fields,
+  newest first) into a `matches` table; the GUI pages through it instantly
 - A legacy in-memory parallel filter (`parallel_filter.py`) remains as a fallback
+  if DuckDB is unavailable
 
 ### File I/O
 - Uses streaming for large files
@@ -466,7 +473,7 @@ pyinstaller --name="OPNsense Log Viewer" \
 ## Resources
 
 - Application Constants: `src/opnsense_log_viewer/constants/app_constants.py`
-- Persistent index engine: `src/opnsense_log_viewer/services/sqlite_index.py`
+- Filter engine: `src/opnsense_log_viewer/services/duckdb_filter.py`
 
 ## Contributing
 
