@@ -340,7 +340,12 @@ def process_entry(entry: LogEntry, options: Dict[str, Any]) -> bool:
 - Use typing module for complex types
 - Optional parameters should have Optional[] type
 
-## Testing Strategy (Future)
+## Testing
+
+The project ships a pytest suite under `tests/` (run with `python -m pytest`).
+When adding features, add or update tests under `tests/unit/` and
+`tests/integration/`; the SQLite filter engine in particular is validated by a
+semantic cross-check against a Python reference (`tests/unit/test_sqlite_index.py`).
 
 ### Unit Tests
 ```python
@@ -426,10 +431,16 @@ python -m opnsense_log_viewer
 - Default cache size: 50 chunks
 - Adjust in `constants/app_constants.py` if needed
 
-### Parallel Processing
-- Automatically uses all CPU cores
-- Can be adjusted in `parallel_filter.py`
-- Optimal for large log files (>100K entries)
+### Filtering (persistent SQLite index)
+- On first filter, each file is parsed once into an on-disk SQLite index
+  (`services/sqlite_index.py`); subsequent filters run as SQL queries instead of
+  re-parsing the file
+- The index is cached per file (keyed by a quick file fingerprint) and reused
+  across sessions, so re-opening a large file is near-instant
+- The special `interface` (physical + logical name) and `__label__` (rule
+  description) filters are resolved in Python at query time, so the index never
+  needs rebuilding when the interface mapping or rule labels change
+- A legacy in-memory parallel filter (`parallel_filter.py`) remains as a fallback
 
 ### File I/O
 - Uses streaming for large files
@@ -454,9 +465,8 @@ pyinstaller --name="OPNsense Log Viewer" \
 
 ## Resources
 
-- Original Implementation: `main_app.py` (deprecated)
-- Refactoring Summary: `REFACTORING_SUMMARY.md`
 - Application Constants: `src/opnsense_log_viewer/constants/app_constants.py`
+- Persistent index engine: `src/opnsense_log_viewer/services/sqlite_index.py`
 
 ## Contributing
 

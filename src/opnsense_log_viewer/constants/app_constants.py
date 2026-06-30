@@ -93,5 +93,5 @@ TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 # Application info
 APP_NAME = "OPNsense Log Viewer"
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 APP_URL = "https://github.com/Shayano/opnsense-log-viewer"

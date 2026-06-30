@@ -10,10 +10,10 @@ Load log files exported from **OPNsense → Firewall → Log Files → Plain Vie
 ## Features
 
 - **Modern GUI**: Clean interface with sortable columns and pagination
-- **Large file support**: Handles multi-GB log files efficiently
-- **Advanced filtering**: Logical operators (AND/OR/NOT), regex, and custom filters
+- **Large file support**: Handles multi-GB log files via a persistent on-disk index. Each file is parsed once, then filtered instantly; the index is cached and reused the next time you open the same file.
+- **Fast filtering**: SQLite-backed queries with logical operators (AND/OR/NOT), regex, time ranges, and reusable saved presets
+- **IPv4 and IPv6**: Decodes both IPv4 and IPv6 filterlog entries
 - **Interface mapping**: Automatic renaming from physical (vtnet0) to logical names (LAN)
-- **Multi-core processing**: Optimized parallel filtering for better performance
 - **SSH integration**: Direct rule label extraction from OPNsense
 - **Export capabilities**: Save filtered results to JSON/CSV
 
@@ -28,8 +28,9 @@ Load log files exported from **OPNsense → Firewall → Log Files → Plain Vie
 # Install dependencies
 pip install -r requirements.txt
 
-# Run application
-python main_app.py
+# Run application (from the project root)
+cd src
+python -m opnsense_log_viewer
 ```
 
 ### Option 3: Build Executable
