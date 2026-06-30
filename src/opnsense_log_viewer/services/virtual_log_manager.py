@@ -121,7 +121,8 @@ class VirtualLogManager:
         self.total_entries = 0
         self.filtered_indices = []  # Indices of entries after filtering
         self.is_filtered = False
-        self.sqlite_index = None  # Persistent SQLite index (parse-once/query-many)
+        self.duckdb_engine = None  # DuckDB fast filter engine (no persistent build)
+        self.duckdb_filtered = False  # True when the current filter is served by DuckDB
 
     def load_file(self, file_path: str, progress_callback=None):
         """Loads a log file (indexing only)"""
@@ -129,11 +130,12 @@ class VirtualLogManager:
         self.cache.clear()
         self.filtered_indices = []
         self.is_filtered = False
+        self.duckdb_filtered = False
 
-        # A new file invalidates any previously opened SQLite index.
-        if self.sqlite_index is not None:
-            self.sqlite_index.close()
-            self.sqlite_index = None
+        # A new file invalidates any previously opened engine.
+        if self.duckdb_engine is not None:
+            self.duckdb_engine.close()
+            self.duckdb_engine = None
 
         # Build the file index
         if progress_callback:
@@ -188,6 +190,9 @@ class VirtualLogManager:
     
     def get_entries(self, start_index: int, count: int) -> List[LogEntry]:
         """Retrieves a range of entries (can span multiple chunks)"""
+        if self.duckdb_filtered and self.duckdb_engine is not None:
+            return self.duckdb_engine.fetch_page(
+                start_index, count, self.log_parser.interface_mapping)
         if self.is_filtered:
             return self._get_filtered_entries(start_index, count)
         else:
@@ -237,36 +242,42 @@ class VirtualLogManager:
         
         return result_entries
     
-    def apply_filter_sql(self, log_filter, label_descriptions=None, progress_callback=None):
-        """Apply a filter via the persistent SQLite index (parse-once/query-many).
+    def apply_filter_duckdb(self, log_filter, label_descriptions=None, progress_callback=None):
+        """Apply a filter via the DuckDB engine (no persistent build).
 
-        Builds (or reuses, from the on-disk cache) the index on first use, then
-        answers the filter with SQL instead of re-parsing the whole file. Produces
-        the same ``filtered_indices`` contract (sorted line numbers) as the legacy
-        path, so the display/export code is unchanged.
+        Scans the raw file once with DuckDB's compiled multi-threaded CSV engine
+        and materializes only the matching rows. Sets ``duckdb_filtered`` so the
+        display/export path pulls pages straight from DuckDB instead of mapping
+        line numbers. Any filter type completes in seconds even on multi-GB files.
         """
-        from opnsense_log_viewer.services.sqlite_index import SQLiteLogIndex
+        from opnsense_log_viewer.services.duckdb_filter import DuckDBLogFilter
 
         if not self.current_file:
             return
 
-        if self.sqlite_index is None:
-            self.sqlite_index = SQLiteLogIndex()
-        self.sqlite_index.build(self.current_file, self.log_parser, progress_callback)
+        # Clear the flag up front so that if build_matches raises, the caller's
+        # fallback path is used instead of serving a previous filter's stale matches.
+        self.duckdb_filtered = False
+
+        if self.duckdb_engine is None:
+            self.duckdb_engine = DuckDBLogFilter(self.current_file)
 
         if progress_callback:
-            progress_callback("Querying index...")
+            progress_callback("Filtering with DuckDB (scanning file)...")
 
-        self.filtered_indices = self.sqlite_index.query_line_numbers(
+        count = self.duckdb_engine.build_matches(
             log_filter.expression,
             (log_filter.time_range_start, log_filter.time_range_end),
             label_descriptions or {},
             self.log_parser.interface_mapping,
         )
+
+        self.duckdb_filtered = True
         self.is_filtered = True
+        self.filtered_indices = []  # unused on the DuckDB path
 
         if progress_callback:
-            progress_callback(f"Found {len(self.filtered_indices):,} matches")
+            progress_callback(f"Found {count:,} matches")
 
     def apply_filter(self, filter_func, progress_callback=None, use_parallel=True):
         """Apply filter and build filtered entries index"""
@@ -439,9 +450,12 @@ class VirtualLogManager:
         """Removes the filter"""
         self.filtered_indices = []
         self.is_filtered = False
-    
+        self.duckdb_filtered = False
+
     def get_total_entries(self) -> int:
         """Returns the total number of entries (filtered or not)"""
+        if self.duckdb_filtered and self.duckdb_engine is not None:
+            return self.duckdb_engine.match_count
         if self.is_filtered:
             return len(self.filtered_indices)
         return self.total_entries
@@ -451,7 +465,7 @@ class VirtualLogManager:
         cache_info = self.cache.get_memory_info()
         return {
             'total_file_entries': self.total_entries,
-            'filtered_entries': len(self.filtered_indices) if self.is_filtered else 0,
+            'filtered_entries': self.get_total_entries() if self.is_filtered else 0,
             'cache_info': cache_info,
             'chunk_size': self.chunk_size,
             'estimated_total_memory_mb': cache_info['estimated_memory_mb']

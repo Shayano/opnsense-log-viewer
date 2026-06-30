@@ -670,7 +670,9 @@ class LogViewerApp:
             max_workers = get_max_parallel_workers()
 
             filter_status = ""
-            if self.virtual_log_manager.is_filtered:
+            if getattr(self.virtual_log_manager, 'duckdb_filtered', False):
+                filter_status = " | Filtered (DuckDB)"
+            elif self.virtual_log_manager.is_filtered:
                 filter_status = f" | Filtered with {max_workers} cores"
 
             self.status_bar.config(text=f"Showing {len(self.displayed_entries):,} entries (Page {self.current_page + 1}/{self.total_pages}) - {total_entries:,} total (~{memory_info['estimated_total_memory_mb']:.1f}MB, {cpu_count} CPU cores){filter_status}")
@@ -749,26 +751,43 @@ class LogViewerApp:
 
     def next_page(self):
         """Go to next page - SAFE VERSION"""
-        # RADICAL FIX: Never try to go beyond a safe threshold
         if hasattr(self, 'virtual_log_manager') and self.virtual_log_manager.current_file:
             total_entries = self.virtual_log_manager.get_total_entries()
+            filtered = self.virtual_log_manager.is_filtered
         else:
             total_entries = self.total_entries_count
+            filtered = False
 
-        # Calculate safe last page (avoid the problematic very last pages)
-        safe_last_page = max(0, ((total_entries - SAFE_TAIL_THRESHOLD) // self.page_size))
+        # When a filter is active, every page is served reliably (DuckDB matches /
+        # filtered_indices), so advance to the true last page. The SAFE_TAIL_THRESHOLD
+        # clamp only exists to avoid the raw-file-tail parsing hazard on the unfiltered
+        # view.
+        if filtered:
+            last_page = max(0, (total_entries - 1) // self.page_size)
+        else:
+            last_page = max(0, ((total_entries - SAFE_TAIL_THRESHOLD) // self.page_size))
 
-        if self.current_page < safe_last_page:
+        if self.current_page < last_page:
             self.current_page += 1
             self.using_fast_tail = False
             self.refresh_display()
-        else:
+        elif not filtered:
             # We're near the end - use Last button for final pages
             if hasattr(self, 'status_bar'):
                 self.status_bar.config(text=f"Near end of file - use 'Last' button to see final entries")
 
     def last_page(self):
         """Go to end of file - ALWAYS use fast tail for safety"""
+        # When a filter is active, the "tail" must be the filtered tail, not the raw
+        # file tail. With the DuckDB engine the last filtered page is instant.
+        if (hasattr(self, 'virtual_log_manager') and self.virtual_log_manager.current_file
+                and self.virtual_log_manager.is_filtered):
+            total_entries = self.virtual_log_manager.get_total_entries()
+            self.total_pages = max(1, (total_entries + self.page_size - 1) // self.page_size)
+            self.current_page = max(0, self.total_pages - 1)
+            self.using_fast_tail = False
+            self.refresh_display()
+            return
         try:
             self._show_file_tail()
         except Exception as e:
@@ -1069,20 +1088,25 @@ class LogViewerApp:
                         self.progress_dialog.update_text(message)
 
                 # Rule label descriptions {rid: description} for __label__ filters,
-                # used by both the SQLite path and the legacy fallback.
+                # used by both the DuckDB engine and the legacy fallback.
                 rule_labels_mapping = {}
                 if self.rule_labels_loaded and hasattr(self.rule_mapper, 'label_descriptions'):
                     rule_labels_mapping = dict(self.rule_mapper.label_descriptions)
 
                 try:
-                    # Primary path: persistent SQLite index (parse once, query many).
-                    self.virtual_log_manager.apply_filter_sql(
+                    # Primary path: DuckDB fast engine (scan once, no persistent build).
+                    self.virtual_log_manager.apply_filter_duckdb(
                         self.log_filter, rule_labels_mapping, progress_callback
                     )
-                except Exception:
-                    # Fallback: legacy in-memory re-parse filtering.
+                except Exception as engine_error:
+                    # Never swallow silently: surface the reason (the old code hid a
+                    # broken fast path as a 20-minute "slow filter"), then fall back to
+                    # the legacy in-memory re-parse so the user still gets a result.
+                    import traceback
+                    traceback.print_exc()
+                    print(f"[filter] DuckDB engine failed, using fallback: {engine_error}")
                     if progress_callback:
-                        progress_callback("Index unavailable, using fallback filtering...")
+                        progress_callback(f"Fast engine unavailable ({engine_error}); using fallback...")
                     if use_parallel and has_label_filters:
                         parallel_filter = ParallelLogFilter()
                         filtered_indices = parallel_filter.apply_filter_parallel(
@@ -1197,17 +1221,15 @@ class LogViewerApp:
             messagebox.showwarning("Warning", "No log file loaded")
             return
 
-        # Check if there's data to export
-        if self.virtual_log_manager.is_filtered:
-            total_entries = len(self.virtual_log_manager.filtered_indices)
-            if total_entries == 0:
-                messagebox.showwarning("Warning", "No filtered data to export")
-                return
-        else:
-            total_entries = self.virtual_log_manager.get_total_entries()
-            if total_entries == 0:
-                messagebox.showwarning("Warning", "No data to export")
-                return
+        # Check if there's data to export (get_total_entries covers both the
+        # DuckDB path, which has no filtered_indices, and the legacy path).
+        total_entries = self.virtual_log_manager.get_total_entries()
+        if total_entries == 0:
+            messagebox.showwarning(
+                "Warning",
+                "No filtered data to export" if self.virtual_log_manager.is_filtered
+                else "No data to export")
+            return
 
         # Choose export file
         file_path = filedialog.asksaveasfilename(
@@ -1234,8 +1256,9 @@ class LogViewerApp:
                 all_filtered_entries = []
 
                 if self.virtual_log_manager.is_filtered:
-                    # Export filtered entries
-                    total_filtered = len(self.virtual_log_manager.filtered_indices)
+                    # Export filtered entries. Use get_entries/get_total_entries so this
+                    # works for both the DuckDB engine and the legacy filtered_indices path.
+                    total_filtered = self.virtual_log_manager.get_total_entries()
 
                     # Process in chunks with progress updates
                     for start_idx in range(0, total_filtered, EXPORT_CHUNK_SIZE):
@@ -1245,7 +1268,7 @@ class LogViewerApp:
                         # Update progress
                         self.progress_dialog.update_text(f"Retrieving data: {start_idx:,}/{total_filtered:,} entries")
 
-                        chunk_entries = self.virtual_log_manager._get_filtered_entries(start_idx, EXPORT_CHUNK_SIZE)
+                        chunk_entries = self.virtual_log_manager.get_entries(start_idx, EXPORT_CHUNK_SIZE)
                         all_filtered_entries.extend(chunk_entries)
 
                 else:
