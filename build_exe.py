@@ -27,6 +27,7 @@ def build_executable():
         '--hidden-import=multiprocessing',  # Ensure multiprocessing works
         '--hidden-import=concurrent.futures',  # Ensure futures work
         '--collect-data=tkinter',  # Ensure Tkinter resources are included
+        '--collect-all=duckdb',  # Bundle the native DuckDB extension (fast filter engine)
     ]
     
     print("Starting executable build...")

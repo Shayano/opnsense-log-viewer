@@ -1,7 +1,5 @@
-pandas
-lxml
+duckdb>=1.0
 pyinstaller
-pyperclip
 paramiko
 
 # Testing dependencies
