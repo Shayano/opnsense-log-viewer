@@ -113,6 +113,52 @@ class TestOPNsenseLogParser:
         assert entry['src'] == '192.168.1.101'
         assert entry['dst'] == '10.0.0.50'
 
+    def test_parse_log_line_ipv6_tcp(self, log_parser):
+        """Test parsing an IPv6 TCP log line (different field layout than IPv4)."""
+        line = ("2024-01-15T10:30:45 opnsense filterlog: 5,,,abc123,igb0,match,"
+                "block,in,6,0x00,0x00000,64,tcp,6,60,2001:db8::1,"
+                "2606:4700:4700::1111,51000,443,0,S")
+        entry = log_parser.parse_log_line(line)
+
+        assert entry is not None
+        assert entry['ipversion'] == '6'
+        assert entry['action'] == 'block'
+        assert entry['protonum'] == '6'
+        assert entry['protoname'] == 'tcp'
+        assert entry['src'] == '2001:db8::1'
+        assert entry['dst'] == '2606:4700:4700::1111'
+        assert entry['srcport'] == '51000'
+        assert entry['dstport'] == '443'
+
+    def test_parse_log_line_ipv6_udp(self, log_parser):
+        """Test parsing an IPv6 UDP log line."""
+        line = ("2024-01-15T10:31:00 opnsense filterlog: 6,,,def456,igb0,match,"
+                "pass,out,6,0x00,0x00000,64,udp,17,80,2001:db8::2,"
+                "2606:4700:4700::1001,5353,53,52")
+        entry = log_parser.parse_log_line(line)
+
+        assert entry is not None
+        assert entry['ipversion'] == '6'
+        assert entry['protonum'] == '17'
+        assert entry['protoname'] == 'udp'
+        assert entry['src'] == '2001:db8::2'
+        assert entry['dst'] == '2606:4700:4700::1001'
+        assert entry['srcport'] == '5353'
+        assert entry['dstport'] == '53'
+
+    def test_parse_log_line_ipv6_icmpv6(self, log_parser):
+        """Test parsing an ICMPv6 log line (no ports)."""
+        line = ("2024-01-15T10:32:00 opnsense filterlog: 7,,,ghi789,igb0,match,"
+                "block,in,6,0x00,0x00000,64,ipv6-icmp,58,64,2001:db8::3,2001:db8::1")
+        entry = log_parser.parse_log_line(line)
+
+        assert entry is not None
+        assert entry['ipversion'] == '6'
+        assert entry['protonum'] == '58'
+        assert entry['protoname'] == 'icmpv6'
+        assert entry['src'] == '2001:db8::3'
+        assert entry['dst'] == '2001:db8::1'
+
     def test_parse_log_line_without_filterlog(self, log_parser):
         """Test parsing line without filterlog keyword."""
         line = "2024-01-15T10:30:45 opnsense: some other log message"

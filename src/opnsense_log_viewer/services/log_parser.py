@@ -152,8 +152,33 @@ class OPNsenseLogParser:
                         rule['urp'] = fields[26] if len(fields) > 26 else ''
                         rule['tcpopts'] = fields[27] if len(fields) > 27 else ''
 
+            elif rule['ipversion'] == '6' and len(fields) > 9:
+                # IPv6 filterlog layout (per pfSense/OPNsense raw filter format):
+                # class, flow-label, hop-limit, proto-text, proto-id, length, src, dst, ...
+                rule['class'] = fields[9] if len(fields) > 9 else ''
+                rule['flowlabel'] = fields[10] if len(fields) > 10 else ''
+                rule['hoplimit'] = fields[11] if len(fields) > 11 else ''
+                rule['protoname'] = fields[12] if len(fields) > 12 else ''
+                rule['protonum'] = fields[13] if len(fields) > 13 else ''
+                rule['length'] = fields[14] if len(fields) > 14 else ''
+                rule['src'] = fields[15] if len(fields) > 15 else ''
+                rule['dst'] = fields[16] if len(fields) > 16 else ''
+
+                if rule['protonum'] in ['6', '17'] and len(fields) > 17:
+                    rule['srcport'] = fields[17] if len(fields) > 17 else ''
+                    rule['dstport'] = fields[18] if len(fields) > 18 else ''
+                    rule['datalen'] = fields[19] if len(fields) > 19 else ''
+
+                    if rule['protonum'] == '6' and len(fields) > 20:
+                        rule['tcpflags'] = fields[20] if len(fields) > 20 else ''
+                        rule['seq'] = fields[21] if len(fields) > 21 else ''
+                        rule['ack'] = fields[22] if len(fields) > 22 else ''
+                        rule['urp'] = fields[23] if len(fields) > 23 else ''
+                        rule['tcpopts'] = fields[24] if len(fields) > 24 else ''
+
             if 'protonum' in rule:
-                proto_map = {'6': 'tcp', '17': 'udp', '1': 'icmp', '112': 'carp'}
+                proto_map = {'6': 'tcp', '17': 'udp', '1': 'icmp',
+                             '58': 'icmpv6', '112': 'carp'}
                 rule['protoname'] = proto_map.get(rule['protonum'], rule['protonum'])
 
         except (IndexError, ValueError):
