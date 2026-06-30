@@ -1060,6 +1060,20 @@ class LogViewerApp:
             # Clear time filter
             self.log_filter.set_time_range(None, None)
 
+        # If no conditions and no time range remain (e.g. the last active filter was
+        # just removed via its X button), there is nothing to filter: restore the raw
+        # view instantly instead of scanning the whole file with the engine (an empty
+        # filter would otherwise materialize every row of a multi-GB log and appear to
+        # hang).
+        has_conditions = len(self.log_filter.expression.conditions) > 0
+        has_time_range = (self.log_filter.time_range_start is not None
+                          or self.log_filter.time_range_end is not None)
+        if not has_conditions and not has_time_range:
+            self.virtual_log_manager.clear_filter()
+            self.current_page = 0
+            self.refresh_display()
+            return
+
         # Create optimized filter function
         # Check if Label filters are present
         has_label_filters = any(
