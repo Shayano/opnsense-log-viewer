@@ -121,14 +121,20 @@ class VirtualLogManager:
         self.total_entries = 0
         self.filtered_indices = []  # Indices of entries after filtering
         self.is_filtered = False
-        
+        self.sqlite_index = None  # Persistent SQLite index (parse-once/query-many)
+
     def load_file(self, file_path: str, progress_callback=None):
         """Loads a log file (indexing only)"""
         self.current_file = file_path
         self.cache.clear()
         self.filtered_indices = []
         self.is_filtered = False
-        
+
+        # A new file invalidates any previously opened SQLite index.
+        if self.sqlite_index is not None:
+            self.sqlite_index.close()
+            self.sqlite_index = None
+
         # Build the file index
         if progress_callback:
             progress_callback("Building file index...")
@@ -231,6 +237,37 @@ class VirtualLogManager:
         
         return result_entries
     
+    def apply_filter_sql(self, log_filter, label_descriptions=None, progress_callback=None):
+        """Apply a filter via the persistent SQLite index (parse-once/query-many).
+
+        Builds (or reuses, from the on-disk cache) the index on first use, then
+        answers the filter with SQL instead of re-parsing the whole file. Produces
+        the same ``filtered_indices`` contract (sorted line numbers) as the legacy
+        path, so the display/export code is unchanged.
+        """
+        from opnsense_log_viewer.services.sqlite_index import SQLiteLogIndex
+
+        if not self.current_file:
+            return
+
+        if self.sqlite_index is None:
+            self.sqlite_index = SQLiteLogIndex()
+        self.sqlite_index.build(self.current_file, self.log_parser, progress_callback)
+
+        if progress_callback:
+            progress_callback("Querying index...")
+
+        self.filtered_indices = self.sqlite_index.query_line_numbers(
+            log_filter.expression,
+            (log_filter.time_range_start, log_filter.time_range_end),
+            label_descriptions or {},
+            self.log_parser.interface_mapping,
+        )
+        self.is_filtered = True
+
+        if progress_callback:
+            progress_callback(f"Found {len(self.filtered_indices):,} matches")
+
     def apply_filter(self, filter_func, progress_callback=None, use_parallel=True):
         """Apply filter and build filtered entries index"""
         self.filtered_indices = []

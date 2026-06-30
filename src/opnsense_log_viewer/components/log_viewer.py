@@ -1068,27 +1068,31 @@ class LogViewerApp:
                     if not self.progress_dialog.cancelled:
                         self.progress_dialog.update_text(message)
 
-                # Prepare label mapping for multiprocessing
-                rule_labels_mapping = None
-                if has_label_filters and self.rule_labels_loaded:
-                    # Create a simple dictionary {rid: description} for serialization
-                    rule_labels_mapping = {}
-                    if hasattr(self.rule_mapper, 'label_descriptions'):
-                        for label_hash, description in self.rule_mapper.label_descriptions.items():
-                            rule_labels_mapping[label_hash] = description
+                # Rule label descriptions {rid: description} for __label__ filters,
+                # used by both the SQLite path and the legacy fallback.
+                rule_labels_mapping = {}
+                if self.rule_labels_loaded and hasattr(self.rule_mapper, 'label_descriptions'):
+                    rule_labels_mapping = dict(self.rule_mapper.label_descriptions)
 
-                # Apply filter using virtual manager with optimized label handling
-                if use_parallel and has_label_filters:
-                    # Use multiprocessing with label mapping
-                    parallel_filter = ParallelLogFilter()
-                    filtered_indices = parallel_filter.apply_filter_parallel(
-                        self.virtual_log_manager, combined_filter, progress_callback, rule_labels_mapping
+                try:
+                    # Primary path: persistent SQLite index (parse once, query many).
+                    self.virtual_log_manager.apply_filter_sql(
+                        self.log_filter, rule_labels_mapping, progress_callback
                     )
-                    self.virtual_log_manager.filtered_indices = filtered_indices
-                    self.virtual_log_manager.is_filtered = True
-                else:
-                    # Use standard method
-                    self.virtual_log_manager.apply_filter(combined_filter, progress_callback, use_parallel)
+                except Exception:
+                    # Fallback: legacy in-memory re-parse filtering.
+                    if progress_callback:
+                        progress_callback("Index unavailable, using fallback filtering...")
+                    if use_parallel and has_label_filters:
+                        parallel_filter = ParallelLogFilter()
+                        filtered_indices = parallel_filter.apply_filter_parallel(
+                            self.virtual_log_manager, combined_filter, progress_callback,
+                            rule_labels_mapping or None
+                        )
+                        self.virtual_log_manager.filtered_indices = filtered_indices
+                        self.virtual_log_manager.is_filtered = True
+                    else:
+                        self.virtual_log_manager.apply_filter(combined_filter, progress_callback, use_parallel)
 
                 if not self.progress_dialog.cancelled:
                     # Update UI in main thread
