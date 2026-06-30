@@ -66,7 +66,7 @@ class TestOPNsenseLogParser:
 
     def test_parse_valid_log_line(self, log_parser):
         """Test parsing a valid log line."""
-        line = "2024-01-15T10:30:45 opnsense filterlog: 100,200,anchor1,12345,em0,match,pass,in,4,0x0,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,"
+        line = "2024-01-15T10:30:45 opnsense filterlog: 100,200,anchor1,12345,em0,match,pass,in,4,0x0,,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,"
         entry = log_parser.parse_log_line(line)
 
         assert entry is not None
@@ -82,7 +82,7 @@ class TestOPNsenseLogParser:
     def test_parse_log_line_with_interface_mapping(self, log_parser):
         """Test parsing with interface mapping."""
         log_parser.set_interface_mapping({'em0': 'LAN Network'})
-        line = "2024-01-15T10:30:45 opnsense filterlog: 100,200,anchor1,12345,em0,match,pass,in,4,0x0,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,"
+        line = "2024-01-15T10:30:45 opnsense filterlog: 100,200,anchor1,12345,em0,match,pass,in,4,0x0,,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,"
         entry = log_parser.parse_log_line(line)
 
         assert entry is not None
@@ -91,7 +91,7 @@ class TestOPNsenseLogParser:
 
     def test_parse_log_line_udp(self, log_parser):
         """Test parsing UDP log line."""
-        line = "2024-01-15T10:31:12 opnsense filterlog: 101,201,anchor2,12346,em1,match,block,out,4,0x0,64,54322,0,none,17,udp,100,10.0.0.50,8.8.8.8,53,53,92"
+        line = "2024-01-15T10:31:12 opnsense filterlog: 101,201,anchor2,12346,em1,match,block,out,4,0x0,,64,54322,0,none,17,udp,100,10.0.0.50,8.8.8.8,53,53,92"
         entry = log_parser.parse_log_line(line)
 
         assert entry is not None
@@ -103,7 +103,7 @@ class TestOPNsenseLogParser:
 
     def test_parse_log_line_icmp(self, log_parser):
         """Test parsing ICMP log line."""
-        line = "2024-01-15T10:31:45 opnsense filterlog: 102,202,anchor1,12347,em0,match,pass,in,4,0x0,64,54323,0,none,1,icmp,84,192.168.1.101,10.0.0.50"
+        line = "2024-01-15T10:31:45 opnsense filterlog: 102,202,anchor1,12347,em0,match,pass,in,4,0x0,,64,54323,0,none,1,icmp,84,192.168.1.101,10.0.0.50"
         entry = log_parser.parse_log_line(line)
 
         assert entry is not None
@@ -139,7 +139,7 @@ class TestOPNsenseLogParser:
     def test_parse_fields_tcp(self, log_parser):
         """Test parsing TCP fields."""
         fields = ['100', '200', 'anchor1', '12345', 'em0', 'match', 'pass', 'in', '4',
-                  '0x0', '64', '54321', '0', 'none', '6', 'tcp', '60', '192.168.1.100',
+                  '0x0', '', '64', '54321', '0', 'none', '6', 'tcp', '60', '192.168.1.100',
                   '10.0.0.50', '12345', '80', '40', 'S', '1234567890', '0', '0']
         rule = log_parser._parse_fields(fields)
 
@@ -158,22 +158,22 @@ class TestOPNsenseLogParser:
         """Test protocol number to name mapping."""
         # TCP
         fields = ['100', '200', 'anchor', '12345', 'em0', 'match', 'pass', 'in', '4',
-                  '0x0', '64', '54321', '0', 'none', '6']
+                  '0x0', '', '64', '54321', '0', 'none', '6']
         rule = log_parser._parse_fields(fields)
         assert rule['protoname'] == 'tcp'
 
         # UDP
-        fields[14] = '17'
+        fields[15] = '17'
         rule = log_parser._parse_fields(fields)
         assert rule['protoname'] == 'udp'
 
         # ICMP
-        fields[14] = '1'
+        fields[15] = '1'
         rule = log_parser._parse_fields(fields)
         assert rule['protoname'] == 'icmp'
 
         # CARP
-        fields[14] = '112'
+        fields[15] = '112'
         rule = log_parser._parse_fields(fields)
         assert rule['protoname'] == 'carp'
 
@@ -246,8 +246,8 @@ class TestOPNsenseLogParser:
 
     def test_digest_generation(self, log_parser):
         """Test MD5 digest generation for log lines."""
-        line1 = "2024-01-15T10:30:45 opnsense filterlog: 100,200,anchor1,12345,em0,match,pass,in,4,0x0,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,"
-        line2 = "2024-01-15T10:30:45 opnsense filterlog: 101,200,anchor1,12345,em0,match,pass,in,4,0x0,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,"
+        line1 = "2024-01-15T10:30:45 opnsense filterlog: 100,200,anchor1,12345,em0,match,pass,in,4,0x0,,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,"
+        line2 = "2024-01-15T10:30:45 opnsense filterlog: 101,200,anchor1,12345,em0,match,pass,in,4,0x0,,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,"
 
         entry1 = log_parser.parse_log_line(line1)
         entry2 = log_parser.parse_log_line(line2)
@@ -258,7 +258,7 @@ class TestOPNsenseLogParser:
 
     def test_timestamp_parsing(self, log_parser):
         """Test timestamp parsing."""
-        line = "2024-01-15T10:30:45 opnsense filterlog: 100,200,anchor1,12345,em0,match,pass,in,4,0x0,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,"
+        line = "2024-01-15T10:30:45 opnsense filterlog: 100,200,anchor1,12345,em0,match,pass,in,4,0x0,,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,"
         entry = log_parser.parse_log_line(line)
 
         assert entry.timestamp is not None
@@ -267,7 +267,7 @@ class TestOPNsenseLogParser:
 
     def test_host_assignment(self, log_parser):
         """Test host assignment."""
-        line = "2024-01-15T10:30:45 opnsense filterlog: 100,200,anchor1,12345,em0,match,pass,in,4,0x0,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,"
+        line = "2024-01-15T10:30:45 opnsense filterlog: 100,200,anchor1,12345,em0,match,pass,in,4,0x0,,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,"
         entry = log_parser.parse_log_line(line)
 
         assert entry.host == 'opnsense'

@@ -62,7 +62,14 @@ def read_file_tail(file_path, num_lines):
 
                 pos = chunk_start
 
+            # A file ending with a newline yields a trailing empty element after
+            # split('\n'); drop it so the count and the last line are correct.
+            if lines and lines[-1] == '':
+                lines.pop()
+
             # Return last num_lines
+            if num_lines <= 0:
+                return []
             return lines[-num_lines:] if len(lines) > num_lines else lines
 
     except PermissionError as e:

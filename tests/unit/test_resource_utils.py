@@ -29,7 +29,7 @@ class TestResourceUtils:
     def test_get_resource_path_pyinstaller_mode(self):
         """Test getting resource path in PyInstaller mode."""
         # Mock PyInstaller environment
-        with patch.object(sys, '_MEIPASS', '/tmp/pyinstaller_temp'):
+        with patch.object(sys, '_MEIPASS', '/tmp/pyinstaller_temp', create=True):
             path = get_resource_path('test.txt')
 
             assert isinstance(path, str)
@@ -125,7 +125,7 @@ class TestResourceUtils:
         dev_path = get_resource_path('test.txt')
 
         # Get PyInstaller mode path
-        with patch.object(sys, '_MEIPASS', '/tmp/different_path'):
+        with patch.object(sys, '_MEIPASS', '/tmp/different_path', create=True):
             pyinstaller_path = get_resource_path('test.txt')
 
         # Normalize for comparison

@@ -77,7 +77,10 @@ class OPNsenseLogParser:
             fields = [f.strip() for f in data_part.split(',')]
             rule = self._parse_fields(fields)
 
-            if not rule or 'action' not in rule:
+            # A valid filterlog entry always carries a non-empty action (pass/block/reject).
+            # _parse_fields always sets the 'action' key (to '' when the field is missing),
+            # so guard on the value, not just key presence, to reject malformed lines.
+            if not rule or not rule.get('action'):
                 return None
 
             if 'interface' in rule and rule['interface'] in self.interface_mapping:

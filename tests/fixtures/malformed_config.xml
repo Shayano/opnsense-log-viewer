@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<opnsense>
+  <interfaces>
+    <lan>
+      <if>em0</if>
+    </lan>
+  </interfaces>
+  <broken>
+</opnsense>

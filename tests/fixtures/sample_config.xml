@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+<opnsense>
+  <interfaces>
+    <lan>
+      <if>em0</if>
+      <descr>LAN Network</descr>
+    </lan>
+    <wan>
+      <if>em1</if>
+      <descr>WAN Connection</descr>
+    </wan>
+    <opt1>
+      <if>em2</if>
+      <descr>DMZ Zone</descr>
+    </opt1>
+  </interfaces>
+  <Firewall>
+    <Alias>
+      <aliases>
+        <alias>
+          <enabled>1</enabled>
+          <name>WebServers</name>
+          <type>host</type>
+          <content>192.168.1.100
+192.168.1.101</content>
+        </alias>
+        <alias>
+          <enabled>1</enabled>
+          <name>HTTPPorts</name>
+          <type>port</type>
+          <content>80
+443
+8080</content>
+        </alias>
+        <alias>
+          <enabled>1</enabled>
+          <name>PrivateNetwork</name>
+          <type>network</type>
+          <content>10.0.0.0/8
+172.16.0.0/12
+192.168.0.0/16</content>
+        </alias>
+        <alias>
+          <enabled>0</enabled>
+          <name>DisabledAlias</name>
+          <type>host</type>
+          <content>1.1.1.1</content>
+        </alias>
+      </aliases>
+    </Alias>
+  </Firewall>
+</opnsense>

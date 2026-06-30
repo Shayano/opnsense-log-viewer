@@ -74,8 +74,10 @@ debug_*.py
 logs/
 
 # Application specific
-config.xml
-*.xml
+# User OPNsense config exports dropped at the repo root.
+# Anchored to the root so test fixtures under tests/fixtures/*.xml stay committable.
+/config.xml
+/*.xml
 test_logs/
 temp/
 
@@ -100,3 +102,8 @@ old_files/
 # IDE and tools
 .bmad-core/
 .claude/
+
+# Test fixtures: keep committable despite the broad *.log / *.xml rules above
+!tests/fixtures/
+!tests/fixtures/*.log
+!tests/fixtures/*.xml

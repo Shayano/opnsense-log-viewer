@@ -62,8 +62,8 @@ def temp_dir():
 def temp_log_file(temp_dir):
     """Create a temporary log file with sample data."""
     log_path = Path(temp_dir) / 'test.log'
-    content = """2024-01-15T10:30:45 opnsense filterlog: 100,200,anchor1,12345,em0,match,pass,in,4,0x0,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,
-2024-01-15T10:31:12 opnsense filterlog: 101,201,anchor2,12346,em1,match,block,out,4,0x0,64,54322,0,none,17,udp,100,10.0.0.50,8.8.8.8,53,53,92
+    content = """2024-01-15T10:30:45 opnsense filterlog: 100,200,anchor1,12345,em0,match,pass,in,4,0x0,,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,
+2024-01-15T10:31:12 opnsense filterlog: 101,201,anchor2,12346,em1,match,block,out,4,0x0,,64,54322,0,none,17,udp,100,10.0.0.50,8.8.8.8,53,53,92
 """
     log_path.write_text(content)
     return str(log_path)
@@ -131,9 +131,9 @@ def virtual_log_manager():
 def sample_log_lines():
     """Return a list of sample log lines."""
     return [
-        "2024-01-15T10:30:45 opnsense filterlog: 100,200,anchor1,12345,em0,match,pass,in,4,0x0,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,",
-        "2024-01-15T10:31:12 opnsense filterlog: 101,201,anchor2,12346,em1,match,block,out,4,0x0,64,54322,0,none,17,udp,100,10.0.0.50,8.8.8.8,53,53,92",
-        "2024-01-15T10:31:45 opnsense filterlog: 102,202,anchor1,12347,em0,match,pass,in,4,0x0,64,54323,0,none,1,icmp,84,192.168.1.101,10.0.0.50",
+        "2024-01-15T10:30:45 opnsense filterlog: 100,200,anchor1,12345,em0,match,pass,in,4,0x0,,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,",
+        "2024-01-15T10:31:12 opnsense filterlog: 101,201,anchor2,12346,em1,match,block,out,4,0x0,,64,54322,0,none,17,udp,100,10.0.0.50,8.8.8.8,53,53,92",
+        "2024-01-15T10:31:45 opnsense filterlog: 102,202,anchor1,12347,em0,match,pass,in,4,0x0,,64,54323,0,none,1,icmp,84,192.168.1.101,10.0.0.50",
     ]
 
 
@@ -257,7 +257,7 @@ def log_entry_factory():
 def large_log_file(temp_dir):
     """Create a large log file for performance testing."""
     log_path = Path(temp_dir) / 'large.log'
-    base_line = "2024-01-15T10:30:45 opnsense filterlog: 100,200,anchor1,12345,em0,match,pass,in,4,0x0,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,\n"
+    base_line = "2024-01-15T10:30:45 opnsense filterlog: 100,200,anchor1,12345,em0,match,pass,in,4,0x0,,64,54321,0,none,6,tcp,60,192.168.1.100,10.0.0.50,12345,80,40,S,1234567890,0,0,\n"
 
     with open(log_path, 'w') as f:
         for i in range(1000):  # 1000 lines for testing
