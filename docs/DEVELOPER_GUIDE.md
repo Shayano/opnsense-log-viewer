@@ -435,8 +435,7 @@ python -m opnsense_log_viewer
 ### Filtering (DuckDB engine)
 - Filters are answered by `services/duckdb_filter.py` (`DuckDBLogFilter`), which
   reads the raw log with DuckDB's compiled, multi-threaded CSV engine and filters
-  it in place. There is NO persistent index to build, so the first filter on a
-  14 GB file completes in tens of seconds and there is no cache to invalidate
+  it in place; the first filter on a 14 GB file completes in tens of seconds
 - The file is read as a single `line` column; every field is extracted on demand
   with `split_part()` plus a `CASE WHEN ipversion='6'` for the version-dependent
   fields, mirroring `OPNsenseLogParser._parse_fields` (IPv4 and IPv6) exactly
@@ -446,6 +445,18 @@ python -m opnsense_log_viewer
   the current mappings, so nothing has to be rebuilt when they change
 - A filter materializes only the matching rows (raw line + resolved display fields,
   newest first) into a `matches` table; the GUI pages through it instantly
+- **Parquet cache**: when a file is loaded, `load_file` also starts a one-time
+  background conversion of the valid rows to a ZSTD Parquet cache (raw line +
+  typed timestamp + resolved fields; ~1.7 GB and ~2-3 min for a 14 GB source;
+  do NOT add a `row_number()` column to the conversion, a windowed column
+  serializes the parquet write and makes it 5x slower). Once ready,
+  `build_matches` transparently reads the cache instead of the raw file and a
+  typical filter answers in ~0.5-5 s. Caches live under
+  `%LOCALAPPDATA%\OPNsenseLogViewer\parquet_cache`, are keyed by
+  (path, size, mtime) so any file change invalidates them, are written
+  atomically, validated at open, and pruned by age (14 days) and total size
+  (20 GB). If the conversion fails the direct scan keeps working: the cache is
+  an accelerator, never a prerequisite
 - A legacy in-memory parallel filter (`parallel_filter.py`) remains as a fallback
   if DuckDB is unavailable
 
