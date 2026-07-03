@@ -112,7 +112,8 @@ class LogFileIndex:
 class VirtualLogManager:
     """Virtual log manager with optimized memory"""
     
-    def __init__(self, chunk_size: int = 1000, cache_size: int = 50, log_parser=None):
+    def __init__(self, chunk_size: int = 1000, cache_size: int = 50, log_parser=None,
+                 duckdb_cache_dir: Optional[str] = None):
         self.chunk_size = chunk_size  # Number of entries per chunk
         self.cache = LRUCache(cache_size)
         self.log_parser = log_parser if log_parser else OPNsenseLogParser()
@@ -121,11 +122,22 @@ class VirtualLogManager:
         self.total_entries = 0
         self.filtered_indices = []  # Indices of entries after filtering
         self.is_filtered = False
-        self.duckdb_engine = None  # DuckDB fast filter engine (no persistent build)
+        self.duckdb_engine = None  # DuckDB fast filter engine
         self.duckdb_filtered = False  # True when the current filter is served by DuckDB
+        # None -> the engine's default (%LOCALAPPDATA%); tests point it elsewhere.
+        self.duckdb_cache_dir = duckdb_cache_dir
+        # Serializes engine creation/teardown: the load thread and the filter
+        # thread can both reach "no engine yet, create one" concurrently.
+        self._engine_lock = threading.Lock()
 
-    def load_file(self, file_path: str, progress_callback=None):
-        """Loads a log file (indexing only)"""
+    def load_file(self, file_path: str, progress_callback=None,
+                  cache_status_callback=None):
+        """Loads a log file (indexing only)
+
+        ``cache_status_callback`` (optional) receives the DuckDB Parquet cache
+        progress strings; unlike ``progress_callback`` it keeps being called
+        (from a background thread) after this method has returned.
+        """
         self.current_file = file_path
         self.cache.clear()
         self.filtered_indices = []
@@ -133,20 +145,53 @@ class VirtualLogManager:
         self.duckdb_filtered = False
 
         # A new file invalidates any previously opened engine.
-        if self.duckdb_engine is not None:
-            self.duckdb_engine.close()
-            self.duckdb_engine = None
+        self.shutdown_duckdb_engine()
 
         # Build the file index
         if progress_callback:
             progress_callback("Building file index...")
-            
+
         self.file_index = LogFileIndex(file_path)
         self.file_index.build_index(progress_callback)
         self.total_entries = self.file_index.total_lines
-        
+
         if progress_callback:
             progress_callback(f"File indexed: {self.total_entries:,} lines ready for streaming")
+
+        # Kick off the one-time DuckDB Parquet cache conversion right away, in
+        # the background: by the time the user has composed a filter it is often
+        # already done, and every filter then runs in ~1-4 s instead of a full
+        # multi-GB scan. Failure here is harmless (direct scan keeps working).
+        self._init_duckdb_engine(cache_status_callback)
+
+    def _init_duckdb_engine(self, cache_status_callback=None):
+        """Create the DuckDB engine for the current file and start its cache."""
+        try:
+            self._ensure_duckdb_engine(cache_status_callback)
+        except Exception:
+            # Optional accelerator only; apply_filter_duckdb retries lazily.
+            pass
+
+    def _ensure_duckdb_engine(self, cache_status_callback=None):
+        """Create (at most once, thread-safe) and return the DuckDB engine."""
+        from opnsense_log_viewer.services.duckdb_filter import DuckDBLogFilter
+        with self._engine_lock:
+            if self.duckdb_engine is None and self.current_file:
+                if not DuckDBLogFilter.is_available():
+                    return None
+                engine = DuckDBLogFilter(
+                    self.current_file, cache_dir=self.duckdb_cache_dir)
+                engine.start_cache_build(cache_status_callback)
+                self.duckdb_engine = engine
+            return self.duckdb_engine
+
+    def shutdown_duckdb_engine(self):
+        """Detach and close the engine, safe against a concurrent creation."""
+        with self._engine_lock:
+            engine = self.duckdb_engine
+            self.duckdb_engine = None
+        if engine is not None:
+            engine.close()
     
     def get_chunk(self, chunk_id: int) -> List[LogEntry]:
         """Retrieves a chunk of logs (with cache)"""
@@ -250,8 +295,6 @@ class VirtualLogManager:
         display/export path pulls pages straight from DuckDB instead of mapping
         line numbers. Any filter type completes in seconds even on multi-GB files.
         """
-        from opnsense_log_viewer.services.duckdb_filter import DuckDBLogFilter
-
         if not self.current_file:
             return
 
@@ -259,13 +302,21 @@ class VirtualLogManager:
         # fallback path is used instead of serving a previous filter's stale matches.
         self.duckdb_filtered = False
 
-        if self.duckdb_engine is None:
-            self.duckdb_engine = DuckDBLogFilter(self.current_file)
+        # Local reference: a concurrent shutdown (file switch, cancelled load)
+        # nulls the attribute, which must not crash a build already underway.
+        engine = self._ensure_duckdb_engine()
+        if engine is None:
+            raise ImportError(
+                "duckdb is required for the fast filter engine "
+                "(pip install duckdb)")
 
         if progress_callback:
-            progress_callback("Filtering with DuckDB (scanning file)...")
+            if engine.cache_ready:
+                progress_callback("Filtering with DuckDB (optimized cache)...")
+            else:
+                progress_callback("Filtering with DuckDB (scanning file)...")
 
-        count = self.duckdb_engine.build_matches(
+        count = engine.build_matches(
             log_filter.expression,
             (log_filter.time_range_start, log_filter.time_range_end),
             label_descriptions or {},

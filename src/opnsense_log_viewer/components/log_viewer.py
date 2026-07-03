@@ -531,14 +531,34 @@ class LogViewerApp:
 
         def load_worker():
             try:
+                # Bind the callbacks to THIS load's dialog: self.progress_dialog is
+                # reused later for filter dialogs, whose cancellation must not
+                # silence the cache status of a load that already succeeded.
+                load_dialog = self.progress_dialog
+
                 def progress_callback(message):
-                    if not self.progress_dialog.cancelled:
-                        self.progress_dialog.update_text(message)
+                    if not load_dialog.cancelled:
+                        load_dialog.update_text(message)
+
+                def cache_status_callback(message):
+                    # Called from the DuckDB cache build thread, possibly minutes
+                    # after loading finished -> route to the status bar via after().
+                    if load_dialog.cancelled:
+                        return
+                    try:
+                        self.root.after(0, lambda m=message: self.status_bar.config(text=m))
+                    except (RuntimeError, tk.TclError):
+                        pass  # window already destroyed
 
                 # Use virtual log manager for memory-efficient loading
-                self.virtual_log_manager.load_file(self.current_log_file, progress_callback)
+                self.virtual_log_manager.load_file(
+                    self.current_log_file, progress_callback, cache_status_callback)
 
-                if self.progress_dialog.cancelled:
+                if load_dialog.cancelled:
+                    # Stop the background cache conversion load_file just started
+                    # and let the UI accept a new load.
+                    self.virtual_log_manager.shutdown_duckdb_engine()
+                    self.is_loading = False
                     return
 
                 # Update UI in main thread
@@ -563,9 +583,17 @@ class LogViewerApp:
         self.current_page = 0
         self.refresh_display()
 
-        # Show memory usage info
+        # Show memory usage info (plus the DuckDB filter-cache state, whose
+        # background build was started by load_file)
         memory_info = self.virtual_log_manager.get_memory_info()
-        self.status_bar.config(text=f"Loaded {total_entries:,} entries (Memory-efficient mode: ~{memory_info['estimated_total_memory_mb']:.1f}MB)")
+        engine = getattr(self.virtual_log_manager, 'duckdb_engine', None)
+        if engine is not None and engine.cache_ready:
+            cache_note = " | Filter cache ready"
+        elif engine is not None:
+            cache_note = " | Optimizing filter cache in background..."
+        else:
+            cache_note = ""
+        self.status_bar.config(text=f"Loaded {total_entries:,} entries (Memory-efficient mode: ~{memory_info['estimated_total_memory_mb']:.1f}MB){cache_note}")
 
     def on_load_error(self, error_message):
         """Called on loading error"""
@@ -671,7 +699,13 @@ class LogViewerApp:
 
             filter_status = ""
             if getattr(self.virtual_log_manager, 'duckdb_filtered', False):
-                filter_status = " | Filtered (DuckDB)"
+                engine = getattr(self.virtual_log_manager, 'duckdb_engine', None)
+                # Report the source of the CURRENTLY displayed matches, not the
+                # present cache state (the cache may have become ready since).
+                if engine is not None and getattr(engine, 'last_used_cache', False):
+                    filter_status = " | Filtered (DuckDB cache)"
+                else:
+                    filter_status = " | Filtered (DuckDB)"
             elif self.virtual_log_manager.is_filtered:
                 filter_status = f" | Filtered with {max_workers} cores"
 
