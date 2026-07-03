@@ -121,9 +121,14 @@ def rule_label_mapper():
 
 
 @pytest.fixture
-def virtual_log_manager():
-    """Create a virtual log manager instance."""
-    return VirtualLogManager(chunk_size=100, cache_size=10)
+def virtual_log_manager(tmp_path):
+    """Create a virtual log manager instance.
+
+    The DuckDB Parquet cache is pointed at a per-test directory so tests never
+    write to the user's real %LOCALAPPDATA% cache.
+    """
+    return VirtualLogManager(chunk_size=100, cache_size=10,
+                             duckdb_cache_dir=str(tmp_path / "pq_cache"))
 
 
 # Sample data fixtures

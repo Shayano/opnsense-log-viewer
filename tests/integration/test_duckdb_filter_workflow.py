@@ -29,7 +29,7 @@ LINES = [
 def loaded_vlm(tmp_path):
     p = tmp_path / "wf.log"
     p.write_text("\n".join(LINES) + "\n", encoding="utf-8")
-    vlm = VirtualLogManager()
+    vlm = VirtualLogManager(duckdb_cache_dir=str(tmp_path / "pq_cache"))
     vlm.load_file(str(p))
     yield vlm
     if vlm.duckdb_engine is not None:
@@ -91,3 +91,45 @@ def test_pagination_through_get_entries(loaded_vlm):
     assert len(next_two) == 2
     raws = {e.raw_line for e in first_two} | {e.raw_line for e in next_two}
     assert len(raws) == 4
+
+
+def _wait_for_cache(vlm, timeout=30):
+    """load_file starts the Parquet conversion in the background; wait for it."""
+    thread = vlm.duckdb_engine._cache_thread
+    if thread is not None:
+        thread.join(timeout=timeout)
+    assert vlm.duckdb_engine.cache_ready
+
+
+def test_load_file_builds_cache_in_background(loaded_vlm):
+    _wait_for_cache(loaded_vlm)
+
+
+def test_filter_on_ready_cache_matches_direct_scan(loaded_vlm):
+    lf = LogFilter()
+    lf.add_filter_condition("action", "==", "block")
+
+    # First filter may run before the cache is ready (direct scan)...
+    loaded_vlm.apply_filter_duckdb(lf)
+    direct_raws = [e.raw_line for e in loaded_vlm.get_entries(0, 10)]
+
+    # ...the same filter on the ready cache must return exactly the same rows.
+    _wait_for_cache(loaded_vlm)
+    loaded_vlm.apply_filter_duckdb(lf)
+    cached_raws = [e.raw_line for e in loaded_vlm.get_entries(0, 10)]
+
+    assert cached_raws == direct_raws
+    assert loaded_vlm.get_total_entries() == 2
+
+
+def test_reload_same_file_reuses_cache(loaded_vlm, tmp_path):
+    _wait_for_cache(loaded_vlm)
+    # Re-loading the unchanged file finds the cache immediately: no rebuild.
+    loaded_vlm.load_file(loaded_vlm.current_file)
+    assert loaded_vlm.duckdb_engine is not None
+    assert loaded_vlm.duckdb_engine.cache_ready
+
+    lf = LogFilter()
+    lf.add_filter_condition("dst", "==", "8.8.8.8")
+    loaded_vlm.apply_filter_duckdb(lf)
+    assert loaded_vlm.get_total_entries() == 2
