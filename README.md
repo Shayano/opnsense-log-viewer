@@ -10,7 +10,7 @@ Load log files exported from **OPNsense → Firewall → Log Files → Plain Vie
 ## Features
 
 - **Modern GUI**: Clean interface with sortable columns and pagination
-- **Large file support**: Handles multi-GB log files. Filtering uses DuckDB's compiled, multi-threaded engine: the first filters scan the raw file in place (tens of seconds on 14 GB), while a compressed Parquet cache is built once in the background (~2-3 min for 14 GB). Once ready, and on every later open of the same file, typical filters answer in ~0.5-5 seconds and every page is instant.
+- **Large file support**: Handles multi-GB log files. Opening a file builds a compressed Parquet cache once in the background (~2-3 min for 14 GB) while the raw view stays browsable; a filter applied before it is ready simply waits for it (with progress). Once ready, and on every later open of the same file, typical filters answer in ~0.5-5 seconds and every page is instant.
 - **Fast filtering**: DuckDB-backed queries with logical operators (AND/OR/NOT), regex, time ranges, and reusable saved presets
 - **IPv4 and IPv6**: Decodes both IPv4 and IPv6 filterlog entries
 - **Interface mapping**: Automatic renaming from physical (vtnet0) to logical names (LAN)

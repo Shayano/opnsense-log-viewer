@@ -451,7 +451,12 @@ python -m opnsense_log_viewer
   do NOT add a `row_number()` column to the conversion, a windowed column
   serializes the parquet write and makes it 5x slower). Once ready,
   `build_matches` transparently reads the cache instead of the raw file and a
-  typical filter answers in ~0.5-5 s. Caches live under
+  typical filter answers in ~0.5-5 s. A filter applied while the conversion is
+  still running WAITS for it (progress via `cache_building`/`cache_progress`)
+  instead of direct-scanning concurrently: two full-file readers fighting for
+  the disk turn a ~30 s scan into minutes. The direct scan only serves when
+  the cache is unavailable for good (build failed), and then runs alone.
+  Caches live under
   `%LOCALAPPDATA%\OPNsenseLogViewer\parquet_cache`, are keyed by
   (path, size, mtime) so any file change invalidates them, are written
   atomically, validated at open, and pruned by age (14 days) and total size
