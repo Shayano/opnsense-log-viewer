@@ -16,6 +16,7 @@ known once the cache is ready; ``total_is_exact`` tells the UI apart.
 import threading
 from typing import List, Optional
 
+from opnsense_log_viewer.services.engine_controller import EngineController
 from opnsense_log_viewer.services.log_parser import OPNsenseLogParser, LogEntry
 
 
@@ -89,13 +90,15 @@ class VirtualLogManager:
         self.log_parser = log_parser if log_parser else OPNsenseLogParser()
         self.current_file = None
         self.is_filtered = False  # True when a filter is materialized in the engine
-        self.duckdb_engine = None  # DuckDB fast filter engine
-        # None -> the engine's default (%LOCALAPPDATA%); tests point it elsewhere.
-        self.duckdb_cache_dir = duckdb_cache_dir
+        # Owns engine creation/waiting/teardown (duckdb_cache_dir None -> the
+        # engine's default under %LOCALAPPDATA%; tests point it elsewhere).
+        self.engine_controller = EngineController(cache_dir=duckdb_cache_dir)
         self._raw_view: Optional[SequentialRawView] = None
-        # Serializes engine creation/teardown: the load thread and the filter
-        # thread can both reach "no engine yet, create one" concurrently.
-        self._engine_lock = threading.Lock()
+
+    @property
+    def duckdb_engine(self):
+        """The current DuckDB engine (None when unavailable or no file open)."""
+        return self.engine_controller.engine
 
     def load_file(self, file_path: str, progress_callback=None,
                   cache_status_callback=None):
@@ -137,24 +140,14 @@ class VirtualLogManager:
 
     def ensure_duckdb_engine(self, cache_status_callback=None):
         """Create (at most once, thread-safe) and return the DuckDB engine."""
-        from opnsense_log_viewer.services.duckdb_filter import DuckDBLogFilter
-        with self._engine_lock:
-            if self.duckdb_engine is None and self.current_file:
-                if not DuckDBLogFilter.is_available():
-                    return None
-                engine = DuckDBLogFilter(
-                    self.current_file, cache_dir=self.duckdb_cache_dir)
-                engine.start_cache_build(cache_status_callback)
-                self.duckdb_engine = engine
-            return self.duckdb_engine
+        if not self.current_file:
+            return None
+        return self.engine_controller.ensure(
+            self.current_file, cache_status_callback)
 
     def shutdown_duckdb_engine(self):
         """Detach and close the engine, safe against a concurrent creation."""
-        with self._engine_lock:
-            engine = self.duckdb_engine
-            self.duckdb_engine = None
-        if engine is not None:
-            engine.close()
+        self.engine_controller.close()
 
     def get_entries(self, start_index: int, count: int) -> List[LogEntry]:
         """Retrieves a range of entries (filtered or raw view)"""

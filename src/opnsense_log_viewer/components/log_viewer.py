@@ -5,7 +5,6 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import os
 import threading
-import time
 from datetime import datetime
 from typing import List, Optional
 import json
@@ -16,6 +15,7 @@ import ipaddress
 from opnsense_log_viewer.services.log_parser import OPNsenseLogParser, LogEntry
 from opnsense_log_viewer.services.config_parser import OPNsenseConfigParser
 from opnsense_log_viewer.services.log_filter import LogFilter
+from opnsense_log_viewer.services.engine_controller import CancellationToken
 from opnsense_log_viewer.services.virtual_log_manager import VirtualLogManager
 from opnsense_log_viewer.services.ssh_client import OPNsenseSSHClient, RuleLabelMapper
 from opnsense_log_viewer.components.progress_dialog import ProgressDialog
@@ -499,23 +499,23 @@ class LogViewerApp:
             return
 
         self.is_loading = True
-        self.progress_dialog = ProgressDialog(self.root, "Loading Log File")
+        # One token per load: cancelling this load must not silence the
+        # cache status of a later one (self.progress_dialog is reused).
+        load_token = CancellationToken()
+        self.progress_dialog = ProgressDialog(self.root, "Loading Log File",
+                                              on_cancel=load_token.cancel)
+        load_dialog = self.progress_dialog
 
         def load_worker():
             try:
-                # Bind the callbacks to THIS load's dialog: self.progress_dialog is
-                # reused later for filter dialogs, whose cancellation must not
-                # silence the cache status of a load that already succeeded.
-                load_dialog = self.progress_dialog
-
                 def progress_callback(message):
-                    if not load_dialog.cancelled:
+                    if not load_token.cancelled:
                         load_dialog.update_text(message)
 
                 def cache_status_callback(message):
                     # Called from the DuckDB cache build thread, possibly minutes
                     # after loading finished -> route to the status bar via after().
-                    if load_dialog.cancelled:
+                    if load_token.cancelled:
                         return
                     try:
                         self.root.after(0, lambda m=message: self.status_bar.config(text=m))
@@ -526,7 +526,7 @@ class LogViewerApp:
                 self.virtual_log_manager.load_file(
                     self.current_log_file, progress_callback, cache_status_callback)
 
-                if load_dialog.cancelled:
+                if load_token.cancelled:
                     # Stop the background cache conversion load_file just started
                     # and let the UI accept a new load.
                     self.virtual_log_manager.shutdown_duckdb_engine()
@@ -1078,22 +1078,20 @@ class LogViewerApp:
             self.refresh_display()
             return
 
-        # Show progress dialog for filtering
-        self.progress_dialog = ProgressDialog(self.root, "Applying Filters")
-
-        # Bind to THIS filter's dialog: self.progress_dialog is reassigned by the
-        # next filter/load, and a cancelled worker must keep seeing its own
-        # cancelled dialog, not latch onto a fresh one.
+        # Show progress dialog for filtering. One token per filter: a cancelled
+        # worker keeps seeing its own token, never a later operation's.
+        filter_token = CancellationToken()
+        self.progress_dialog = ProgressDialog(self.root, "Applying Filters",
+                                              on_cancel=filter_token.cancel)
         filter_dialog = self.progress_dialog
 
         def filter_worker():
             try:
                 def progress_callback(message):
-                    if not filter_dialog.cancelled:
+                    if not filter_token.cancelled:
                         filter_dialog.update_text(message)
 
-                # Rule label descriptions {rid: description} for __label__ filters,
-                # used by both the DuckDB engine and the legacy fallback.
+                # Rule label descriptions {rid: description} for __label__ filters.
                 rule_labels_mapping = {}
                 if self.rule_labels_loaded and hasattr(self.rule_mapper, 'label_descriptions'):
                     rule_labels_mapping = dict(self.rule_mapper.label_descriptions)
@@ -1107,26 +1105,24 @@ class LogViewerApp:
                     engine = self.virtual_log_manager.ensure_duckdb_engine()
                 except Exception:
                     engine = None
-                if engine is not None:
-                    while (not engine.cache_ready and not engine.cache_failed
-                           and engine.cache_building
-                           and not filter_dialog.cancelled):
-                        pct = engine.cache_progress()
-                        if pct is not None:
-                            progress_callback(
-                                f"Optimizing filter cache (one-time)... {pct:.0%}")
-                        else:
-                            progress_callback(
-                                "Optimizing filter cache (one-time)...")
-                        time.sleep(0.5)
-                    if filter_dialog.cancelled:
-                        return
-                    # If the engine was torn down while we waited (a cancelled
-                    # load switching context), do NOT let a fresh engine be built
-                    # and direct-scanned concurrently: abort this stale filter.
-                    if engine.is_closed:
-                        self.root.after(0, self.on_filter_applied)
-                        return
+
+                def on_wait_progress(fraction):
+                    if fraction is not None:
+                        progress_callback(
+                            f"Optimizing filter cache (one-time)... {fraction:.0%}")
+                    else:
+                        progress_callback("Optimizing filter cache (one-time)...")
+
+                state = self.virtual_log_manager.engine_controller.wait_cache_ready(
+                    token=filter_token, on_progress=on_wait_progress, engine=engine)
+                if state == 'cancelled':
+                    return
+                if state == 'closed':
+                    # The engine was torn down while we waited (a cancelled load
+                    # switching context): do NOT let a fresh engine be built and
+                    # direct-scanned concurrently, abort this stale filter.
+                    self.root.after(0, self.on_filter_applied)
+                    return
 
                 # Single filtering path: the DuckDB engine. Pass the exact engine
                 # we waited on so the filter cannot resolve a different one. On
@@ -1137,7 +1133,7 @@ class LogViewerApp:
                     engine=engine
                 )
 
-                if not filter_dialog.cancelled:
+                if not filter_token.cancelled:
                     # Update UI in main thread
                     self.root.after(0, self.on_filter_applied)
 

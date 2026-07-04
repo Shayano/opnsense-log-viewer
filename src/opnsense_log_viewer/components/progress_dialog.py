@@ -8,15 +8,18 @@ from tkinter import ttk
 class ProgressDialog:
     """Progress dialog for long operations"""
 
-    def __init__(self, parent, title="Loading..."):
+    def __init__(self, parent, title="Loading...", on_cancel=None):
         """
         Initialize progress dialog.
 
         Args:
             parent: Parent window
             title: Dialog title
+            on_cancel: Optional callable invoked when the user cancels
+                (typically a CancellationToken.cancel)
         """
         self.parent = parent
+        self._on_cancel = on_cancel
         self.dialog = tk.Toplevel(parent)
         self.dialog.title(title)
         self.dialog.geometry("400x100")
@@ -59,6 +62,11 @@ class ProgressDialog:
     def cancel(self):
         """Cancel the operation"""
         self.cancelled = True
+        if self._on_cancel is not None:
+            try:
+                self._on_cancel()
+            except Exception:
+                pass
         self.close()
 
     def close(self):
