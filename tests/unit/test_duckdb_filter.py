@@ -402,3 +402,21 @@ def test_cache_key_ignores_path_case(log_file, cache_dir):
     finally:
         eng1.close()
         eng2.close()
+
+
+def test_cache_state_api(log_file, cache_dir):
+    # The GUI's wait-for-cache gate relies on these three signals.
+    eng = DuckDBLogFilter(log_file, cache_dir=cache_dir)
+    try:
+        assert eng.cache_failed is False
+        assert eng.cache_building is False
+        eng.build_cache_sync()
+        assert eng.cache_progress() == 1.0
+        assert eng.cache_failed is False
+        assert eng.cache_building is False
+    finally:
+        eng.close()
+    # A closed engine can never become ready: the gate must not wait on it.
+    assert eng.cache_failed is True
+    assert eng.is_closed is True
+    assert eng.cache_building is False

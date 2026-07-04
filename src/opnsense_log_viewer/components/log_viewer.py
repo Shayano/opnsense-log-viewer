@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import os
 import threading
+import time
 from datetime import datetime
 from typing import List, Optional
 import json
@@ -1073,6 +1074,15 @@ class LogViewerApp:
         if not hasattr(self, 'virtual_log_manager') or not self.virtual_log_manager.current_file:
             return
 
+        # A load still running (including one whose progress dialog was cancelled
+        # but whose background indexing/cache build keeps going) owns the engine
+        # and the current file. Filtering now would race that load's engine
+        # teardown and possibly act on a half-loaded file, so refuse until it
+        # settles.
+        if getattr(self, 'is_loading', False):
+            self.status_bar.config(text="Still loading the file, please wait...")
+            return
+
         # Apply time filter if enabled
         if self.time_filter_enabled.get():
             try:
@@ -1129,11 +1139,16 @@ class LogViewerApp:
         # Show progress dialog for filtering
         self.progress_dialog = ProgressDialog(self.root, "Applying Filters")
 
+        # Bind to THIS filter's dialog: self.progress_dialog is reassigned by the
+        # next filter/load, and a cancelled worker must keep seeing its own
+        # cancelled dialog, not latch onto a fresh one.
+        filter_dialog = self.progress_dialog
+
         def filter_worker():
             try:
                 def progress_callback(message):
-                    if not self.progress_dialog.cancelled:
-                        self.progress_dialog.update_text(message)
+                    if not filter_dialog.cancelled:
+                        filter_dialog.update_text(message)
 
                 # Rule label descriptions {rid: description} for __label__ filters,
                 # used by both the DuckDB engine and the legacy fallback.
@@ -1141,10 +1156,42 @@ class LogViewerApp:
                 if self.rule_labels_loaded and hasattr(self.rule_mapper, 'label_descriptions'):
                     rule_labels_mapping = dict(self.rule_mapper.label_descriptions)
 
+                # Filtering DURING the one-time cache conversion would make the
+                # direct scan and the conversion fight for the disk (observed:
+                # minutes instead of ~30 s). So wait for the cache (with
+                # progress) and filter it in seconds; the direct scan only runs
+                # when the cache is unavailable for good (build failed), alone.
                 try:
-                    # Primary path: DuckDB fast engine (scan once, no persistent build).
+                    engine = self.virtual_log_manager.ensure_duckdb_engine()
+                except Exception:
+                    engine = None
+                if engine is not None:
+                    while (not engine.cache_ready and not engine.cache_failed
+                           and engine.cache_building
+                           and not filter_dialog.cancelled):
+                        pct = engine.cache_progress()
+                        if pct is not None:
+                            progress_callback(
+                                f"Optimizing filter cache (one-time)... {pct:.0%}")
+                        else:
+                            progress_callback(
+                                "Optimizing filter cache (one-time)...")
+                        time.sleep(0.5)
+                    if filter_dialog.cancelled:
+                        return
+                    # If the engine was torn down while we waited (a cancelled
+                    # load switching context), do NOT let a fresh engine be built
+                    # and direct-scanned concurrently: abort this stale filter.
+                    if engine.is_closed:
+                        self.root.after(0, self.on_filter_applied)
+                        return
+
+                try:
+                    # Primary path: DuckDB fast engine. Pass the exact engine we
+                    # waited on so the filter cannot resolve a different one.
                     self.virtual_log_manager.apply_filter_duckdb(
-                        self.log_filter, rule_labels_mapping, progress_callback
+                        self.log_filter, rule_labels_mapping, progress_callback,
+                        engine=engine
                     )
                 except Exception as engine_error:
                     # Never swallow silently: surface the reason (the old code hid a
@@ -1166,7 +1213,7 @@ class LogViewerApp:
                     else:
                         self.virtual_log_manager.apply_filter(combined_filter, progress_callback, use_parallel)
 
-                if not self.progress_dialog.cancelled:
+                if not filter_dialog.cancelled:
                     # Update UI in main thread
                     self.root.after(0, self.on_filter_applied)
 

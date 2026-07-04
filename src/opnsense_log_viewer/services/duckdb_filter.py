@@ -40,12 +40,16 @@ Parquet cache
 Direct scan makes EVERY filter re-read the whole file (~17-37 s on 14 GB). A
 one-time background conversion therefore writes the valid rows (raw line, typed
 timestamp, resolved fields) to a ZSTD Parquet cache; once it is in place every
-filter reads the cache instead of the raw file and drops to ~1-4 s (measured on
-the same 14 GB / 72 M-row file, cache 1.6 GB built in ~84 s). Until the cache is
-ready (or if the conversion fails) filters keep using the direct scan, so the
-cache is a pure accelerator, never a prerequisite. Cache files are keyed by
-(absolute path, size, mtime) so any file change invalidates them, are written
-atomically (tmp + os.replace), and old ones are pruned by age and total size.
+filter reads the cache instead of the raw file and drops to ~0.5-5 s (measured
+on the same 14 GB / 72 M-row file, cache 1.7 GB built in ~2.5 min). While the
+conversion runs, the GUI WAITS for it before filtering (cache_building /
+cache_progress) rather than direct-scanning concurrently: two full-file readers
+fighting for the disk were observed to turn a ~30 s scan into many minutes. The
+direct scan remains the fallback whenever the cache is unavailable for good
+(conversion failed, source file changed mid-session), and then runs alone.
+Cache files are keyed by (schema version, canonical path, size, mtime) so any
+file change invalidates them, are written atomically (tmp + os.replace), and
+old ones are pruned by age and total size.
 """
 import hashlib
 import os
@@ -504,6 +508,39 @@ class DuckDBLogFilter:
         return self.match_count
 
     # ----- Parquet cache ------------------------------------------------------
+    @property
+    def is_closed(self) -> bool:
+        """True once close() ran; the engine can no longer run queries."""
+        return self._closed
+
+    @property
+    def cache_failed(self) -> bool:
+        """True when the cache can no longer become ready in this session."""
+        return self._cache_failed or self._closed
+
+    @property
+    def cache_building(self) -> bool:
+        """True while the background conversion thread is running."""
+        thread = self._cache_thread
+        return thread is not None and thread.is_alive()
+
+    def cache_progress(self) -> Optional[float]:
+        """Rough progress (0-1) of a running conversion, from the tmp file size
+        (the final parquet measures ~12% of the raw source)."""
+        if self.cache_ready:
+            return 1.0
+        if self.parquet_path is None:
+            return None
+        try:
+            tmp_size = os.path.getsize(
+                f"{self.parquet_path}.{os.getpid()}.tmp")
+            src_size = os.path.getsize(self.file_path)
+        except OSError:
+            return None
+        if src_size <= 0:
+            return None
+        return min(0.99, tmp_size / (src_size * 0.12))
+
     def _use_cache(self) -> bool:
         if not (self.cache_ready and self.parquet_path
                 and os.path.exists(self.parquet_path)):

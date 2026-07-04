@@ -49,7 +49,12 @@ class ProgressDialog:
         Args:
             text: New text to display
         """
-        self.label.config(text=text)
+        # A worker thread may call this right as the dialog is destroyed by a
+        # Cancel click; tolerate the resulting TclError instead of crashing.
+        try:
+            self.label.config(text=text)
+        except tk.TclError:
+            pass
 
     def cancel(self):
         """Cancel the operation"""
@@ -58,5 +63,10 @@ class ProgressDialog:
 
     def close(self):
         """Close the dialog"""
-        self.progress.stop()
-        self.dialog.destroy()
+        # Idempotent: on_filter_applied/on_filter_error may call close() after a
+        # Cancel already destroyed the dialog.
+        try:
+            self.progress.stop()
+            self.dialog.destroy()
+        except tk.TclError:
+            pass

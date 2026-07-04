@@ -167,12 +167,12 @@ class VirtualLogManager:
     def _init_duckdb_engine(self, cache_status_callback=None):
         """Create the DuckDB engine for the current file and start its cache."""
         try:
-            self._ensure_duckdb_engine(cache_status_callback)
+            self.ensure_duckdb_engine(cache_status_callback)
         except Exception:
             # Optional accelerator only; apply_filter_duckdb retries lazily.
             pass
 
-    def _ensure_duckdb_engine(self, cache_status_callback=None):
+    def ensure_duckdb_engine(self, cache_status_callback=None):
         """Create (at most once, thread-safe) and return the DuckDB engine."""
         from opnsense_log_viewer.services.duckdb_filter import DuckDBLogFilter
         with self._engine_lock:
@@ -287,13 +287,19 @@ class VirtualLogManager:
         
         return result_entries
     
-    def apply_filter_duckdb(self, log_filter, label_descriptions=None, progress_callback=None):
+    def apply_filter_duckdb(self, log_filter, label_descriptions=None,
+                            progress_callback=None, engine=None):
         """Apply a filter via the DuckDB engine (no persistent build).
 
         Scans the raw file once with DuckDB's compiled multi-threaded CSV engine
         and materializes only the matching rows. Sets ``duckdb_filtered`` so the
         display/export path pulls pages straight from DuckDB instead of mapping
         line numbers. Any filter type completes in seconds even on multi-GB files.
+
+        ``engine`` lets the caller pass the exact engine it already gated on (see
+        the GUI's wait-for-cache loop): reusing it guarantees the filter and the
+        gate act on the same object, instead of resolving a possibly-new engine
+        that would build and direct-scan concurrently.
         """
         if not self.current_file:
             return
@@ -304,7 +310,8 @@ class VirtualLogManager:
 
         # Local reference: a concurrent shutdown (file switch, cancelled load)
         # nulls the attribute, which must not crash a build already underway.
-        engine = self._ensure_duckdb_engine()
+        if engine is None:
+            engine = self.ensure_duckdb_engine()
         if engine is None:
             raise ImportError(
                 "duckdb is required for the fast filter engine "
