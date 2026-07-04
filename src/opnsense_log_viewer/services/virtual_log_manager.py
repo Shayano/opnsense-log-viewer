@@ -1,163 +1,130 @@
 """
-Virtual Log Manager - Memory-optimized log manager
-Streaming system with LRU cache to handle multi-GB log files
+Virtual Log Manager - serves log pages without loading the file in memory.
+
+The raw (unfiltered) view and the filtered view are both backed by the DuckDB
+engine's Parquet cache once its one-time conversion is done: pages and exact
+counts come straight from the cache in milliseconds, and opening a file no
+longer scans it at all (the old Python line-offset index read the whole file
+once and the cache conversion read it a second time).
+
+Until the cache is ready (or if it can never be), the raw view is served by
+``SequentialRawView``: a lazy reader that parses the file from the top only as
+far as the user actually browses, remembering a sparse offset every ``stride``
+entries so revisiting earlier pages stays O(1). The total entry count is only
+known once the cache is ready; ``total_is_exact`` tells the UI apart.
 """
-import os
-from typing import List, Optional, Dict, Any, Tuple
-from datetime import datetime
 import threading
-from collections import OrderedDict
+from typing import List, Optional
 
 from opnsense_log_viewer.services.log_parser import OPNsenseLogParser, LogEntry
 
-class LRUCache:
-    """Simple LRU cache for log chunks"""
-    
-    def __init__(self, max_size: int = 50):  # 50 chunks max in memory
-        self.max_size = max_size
-        self.cache = OrderedDict()
-        self.lock = threading.Lock()
-    
-    def get(self, key: str) -> Optional[List[LogEntry]]:
-        """Retrieves a chunk from cache"""
-        with self.lock:
-            if key in self.cache:
-                # Move to end (recently used)
-                self.cache.move_to_end(key)
-                return self.cache[key]
-        return None
-    
-    def put(self, key: str, value: List[LogEntry]):
-        """Adds a chunk to cache"""
-        with self.lock:
-            if key in self.cache:
-                self.cache.move_to_end(key)
-            else:
-                self.cache[key] = value
-                if len(self.cache) > self.max_size:
-                    # Remove the oldest
-                    self.cache.popitem(last=False)
-    
-    def clear(self):
-        """Clears the cache"""
-        with self.lock:
-            self.cache.clear()
-    
-    def get_memory_info(self) -> Dict[str, Any]:
-        """Returns memory usage information"""
-        with self.lock:
-            total_entries = sum(len(chunk) for chunk in self.cache.values())
-            return {
-                'chunks_in_memory': len(self.cache),
-                'total_entries_cached': total_entries,
-                'estimated_memory_mb': total_entries * 0.5 / 1024  # ~0.5KB per entry
-            }
 
-class LogFileIndex:
-    """Index of a log file for fast line access"""
-    
-    def __init__(self, file_path: str):
+class SequentialRawView:
+    """Raw-view pages read lazily from the log file (pre-cache fallback).
+
+    Counts *valid* entries (``parse_log_line`` accepts them), exactly like the
+    Parquet cache's validity gate, so pagination does not jump when the view
+    switches to the cache.
+    """
+
+    def __init__(self, file_path: str, log_parser, stride: int = 1000):
         self.file_path = file_path
-        self.line_offsets = []  # Offset of each line in the file
-        self.total_lines = 0
-        self.file_size = 0
-        self.index_built = False
-        self.lock = threading.Lock()
-        
-    def build_index(self, progress_callback=None):
-        """Builds the line position index"""
-        if self.index_built:
-            return
-            
-        with self.lock:
-            if self.index_built:  # Double-check
-                return
-                
-            self.line_offsets = [0]  # First line starts at 0
-            self.file_size = os.path.getsize(self.file_path)
-            
-            with open(self.file_path, 'rb') as f:
-                offset = 0
-                line_count = 0
-                
-                while True:
-                    line = f.readline()
-                    if not line:
-                        break
-                    
-                    offset += len(line)
-                    self.line_offsets.append(offset)
-                    line_count += 1
-                    
-                    if progress_callback and line_count % 10000 == 0:
-                        progress_callback(f"Indexing: {line_count:,} lines processed...")
-                
-                self.total_lines = line_count
-                self.index_built = True
-                
-                if progress_callback:
-                    progress_callback(f"Index complete: {self.total_lines:,} lines")
-    
-    def get_line_range(self, start_line: int, count: int) -> Tuple[int, int]:
-        """Returns the start offset and size for a line range"""
-        if not self.index_built or start_line >= self.total_lines:
-            return (0, 0)
-            
-        end_line = min(start_line + count, self.total_lines)
-        start_offset = self.line_offsets[start_line]
-        end_offset = self.line_offsets[end_line] if end_line < len(self.line_offsets) else self.file_size
-        
-        return (start_offset, end_offset - start_offset)
+        self.log_parser = log_parser
+        self.stride = stride
+        # _offsets[k] = byte offset of the line holding valid entry k*stride
+        self._offsets = [0]
+        self._known_entries = 0   # entries seen so far (== scan frontier)
+        self._exhausted = False   # EOF reached -> _known_entries is the total
+        self._lock = threading.Lock()
+
+    @property
+    def known_entries(self) -> int:
+        return self._known_entries
+
+    @property
+    def is_complete(self) -> bool:
+        return self._exhausted
+
+    def get_entries(self, start: int, count: int) -> List[LogEntry]:
+        """Return up to ``count`` valid entries starting at index ``start``,
+        extending the scan frontier if the range was never visited."""
+        if count <= 0 or start < 0:
+            return []
+        with self._lock:
+            return self._read_range(start, count)
+
+    def _read_range(self, start: int, count: int) -> List[LogEntry]:
+        block = min(start // self.stride, len(self._offsets) - 1)
+        entry_idx = block * self.stride
+        end = start + count
+        entries: List[LogEntry] = []
+        with open(self.file_path, 'rb') as f:
+            f.seek(self._offsets[block])
+            offset = self._offsets[block]
+            while entry_idx < end:
+                raw = f.readline()
+                if not raw:
+                    self._exhausted = True
+                    break
+                line = raw.decode('utf-8', errors='ignore').strip()
+                entry = self.log_parser.parse_log_line(line)
+                offset_after = offset + len(raw)
+                if entry is not None:
+                    if entry_idx % self.stride == 0:
+                        k = entry_idx // self.stride
+                        if k == len(self._offsets):
+                            self._offsets.append(offset)
+                    if entry_idx >= start:
+                        entries.append(entry)
+                    entry_idx += 1
+                offset = offset_after
+            self._known_entries = max(self._known_entries, entry_idx)
+        return entries
+
 
 class VirtualLogManager:
-    """Virtual log manager with optimized memory"""
-    
-    def __init__(self, chunk_size: int = 1000, cache_size: int = 50, log_parser=None,
-                 duckdb_cache_dir: Optional[str] = None):
-        self.chunk_size = chunk_size  # Number of entries per chunk
-        self.cache = LRUCache(cache_size)
+    """Serves pages of a (possibly multi-GB) log file with bounded memory."""
+
+    def __init__(self, log_parser=None, duckdb_cache_dir: Optional[str] = None):
         self.log_parser = log_parser if log_parser else OPNsenseLogParser()
-        self.file_index = None
         self.current_file = None
-        self.total_entries = 0
         self.is_filtered = False  # True when a filter is materialized in the engine
         self.duckdb_engine = None  # DuckDB fast filter engine
         # None -> the engine's default (%LOCALAPPDATA%); tests point it elsewhere.
         self.duckdb_cache_dir = duckdb_cache_dir
+        self._raw_view: Optional[SequentialRawView] = None
         # Serializes engine creation/teardown: the load thread and the filter
         # thread can both reach "no engine yet, create one" concurrently.
         self._engine_lock = threading.Lock()
 
     def load_file(self, file_path: str, progress_callback=None,
                   cache_status_callback=None):
-        """Loads a log file (indexing only)
+        """Open a log file. Near-instant: no upfront scan of the file.
 
-        ``cache_status_callback`` (optional) receives the DuckDB Parquet cache
-        progress strings; unlike ``progress_callback`` it keeps being called
-        (from a background thread) after this method has returned.
+        The one-time DuckDB Parquet conversion starts right away in the
+        background; until it finishes the raw view is read lazily from the
+        file. ``cache_status_callback`` (optional) receives the cache progress
+        strings and keeps being called (from a background thread) after this
+        method has returned.
         """
         self.current_file = file_path
-        self.cache.clear()
         self.is_filtered = False
 
         # A new file invalidates any previously opened engine.
         self.shutdown_duckdb_engine()
 
-        # Build the file index
         if progress_callback:
-            progress_callback("Building file index...")
+            progress_callback("Opening file...")
 
-        self.file_index = LogFileIndex(file_path)
-        self.file_index.build_index(progress_callback)
-        self.total_entries = self.file_index.total_lines
-
-        if progress_callback:
-            progress_callback(f"File indexed: {self.total_entries:,} lines ready for streaming")
+        self._raw_view = SequentialRawView(file_path, self.log_parser)
+        # Fail fast on an unreadable file (permission, vanished path...):
+        # priming the first page raises here, inside the caller's try.
+        self._raw_view.get_entries(0, 1)
 
         # Kick off the one-time DuckDB Parquet cache conversion right away, in
-        # the background: by the time the user has composed a filter it is often
-        # already done, and every filter then runs in ~1-4 s instead of a full
-        # multi-GB scan. Failure here is harmless (direct scan keeps working).
+        # the background: it is the source of the full pagination, the exact
+        # count and near-instant filters. Failure here is not fatal (the lazy
+        # raw view keeps working and filters fall back to the direct scan).
         self._init_duckdb_engine(cache_status_callback)
 
     def _init_duckdb_engine(self, cache_status_callback=None):
@@ -188,85 +155,30 @@ class VirtualLogManager:
             self.duckdb_engine = None
         if engine is not None:
             engine.close()
-    
-    def get_chunk(self, chunk_id: int) -> List[LogEntry]:
-        """Retrieves a chunk of logs (with cache)"""
-        if not self.file_index or not self.file_index.index_built:
-            return []
-            
-        cache_key = f"{self.current_file}_{chunk_id}"
-        
-        # Check cache
-        cached_chunk = self.cache.get(cache_key)
-        if cached_chunk is not None:
-            return cached_chunk
-        
-        # Load chunk from file
-        start_line = chunk_id * self.chunk_size
-        if start_line >= self.file_index.total_lines:
-            return []
-            
-        chunk_entries = []
-        start_offset, size = self.file_index.get_line_range(start_line, self.chunk_size)
-        
-        if size > 0:
-            with open(self.current_file, 'r', encoding='utf-8', errors='ignore') as f:
-                f.seek(start_offset)
-                lines_read = 0
-                
-                while lines_read < self.chunk_size:
-                    line = f.readline()
-                    if not line:
-                        break
-                        
-                    # Parse the line
-                    entry = self.log_parser.parse_log_line(line.strip())
-                    if entry:
-                        chunk_entries.append(entry)
-                    lines_read += 1
-        
-        # Cache it
-        self.cache.put(cache_key, chunk_entries)
-        return chunk_entries
-    
+
     def get_entries(self, start_index: int, count: int) -> List[LogEntry]:
-        """Retrieves a range of entries (can span multiple chunks)"""
+        """Retrieves a range of entries (filtered or raw view)"""
         if self.is_filtered and self.duckdb_engine is not None:
             return self.duckdb_engine.fetch_page(
                 start_index, count, self.log_parser.interface_mapping)
-        return self._get_raw_entries(start_index, count)
-    
-    def _get_raw_entries(self, start_index: int, count: int) -> List[LogEntry]:
-        """Retrieves raw entries (unfiltered)"""
-        entries = []
-        current_index = start_index
-        remaining = count
-        
-        while remaining > 0 and current_index < self.total_entries:
-            chunk_id = current_index // self.chunk_size
-            chunk_offset = current_index % self.chunk_size
-            
-            chunk = self.get_chunk(chunk_id)
-            if not chunk:
-                break
-                
-            # Take what we can from this chunk
-            take_count = min(remaining, len(chunk) - chunk_offset)
-            entries.extend(chunk[chunk_offset:chunk_offset + take_count])
-            
-            current_index += take_count
-            remaining -= take_count
-        
-        return entries
-    
+        engine = self.duckdb_engine
+        if engine is not None:
+            page = engine.browse_page(
+                start_index, count, self.log_parser.interface_mapping)
+            if page is not None:
+                return page
+        if self._raw_view is not None:
+            return self._raw_view.get_entries(start_index, count)
+        return []
+
     def apply_filter_duckdb(self, log_filter, label_descriptions=None,
                             progress_callback=None, engine=None):
         """Apply a filter via the DuckDB engine (no persistent build).
 
-        Scans the raw file once with DuckDB's compiled multi-threaded CSV engine
-        and materializes only the matching rows. Sets ``is_filtered`` so the
-        display/export path pulls pages straight from DuckDB instead of mapping
-        line numbers. Any filter type completes in seconds even on multi-GB files.
+        Scans the Parquet cache (or the raw file when the cache is
+        unavailable) and materializes only the matching rows. Sets
+        ``is_filtered`` so the display/export path pulls pages from the
+        engine's matches table.
 
         ``engine`` lets the caller pass the exact engine it already gated on (see
         the GUI's wait-for-cache loop): reusing it guarantees the filter and the
@@ -311,25 +223,36 @@ class VirtualLogManager:
         """Removes the filter"""
         self.is_filtered = False
 
+    @property
+    def total_entries(self) -> int:
+        """Unfiltered count of valid entries.
+
+        Exact once the Parquet cache is ready; before that, the number of
+        entries the lazy raw view has discovered so far (see total_is_exact).
+        """
+        engine = self.duckdb_engine
+        if engine is not None:
+            n = engine.row_count()
+            if n is not None:
+                return n
+        if self._raw_view is not None:
+            return self._raw_view.known_entries
+        return 0
+
+    @property
+    def total_is_exact(self) -> bool:
+        """False while the total is still a moving frontier (cache building)."""
+        if self.is_filtered and self.duckdb_engine is not None:
+            return True
+        engine = self.duckdb_engine
+        if engine is not None and engine.row_count() is not None:
+            return True
+        if self._raw_view is not None:
+            return self._raw_view.is_complete
+        return True
+
     def get_total_entries(self) -> int:
         """Returns the total number of entries (filtered or not)"""
         if self.is_filtered and self.duckdb_engine is not None:
             return self.duckdb_engine.match_count
         return self.total_entries
-    
-    def get_memory_info(self) -> Dict[str, Any]:
-        """Returns memory usage information"""
-        cache_info = self.cache.get_memory_info()
-        return {
-            'total_file_entries': self.total_entries,
-            'filtered_entries': self.get_total_entries() if self.is_filtered else 0,
-            'cache_info': cache_info,
-            'chunk_size': self.chunk_size,
-            'estimated_total_memory_mb': cache_info['estimated_memory_mb']
-        }
-    
-    def set_interface_mapping(self, mapping: Dict[str, str]):
-        """Configures interface mapping"""
-        # The parser is now shared with main_app, no need to configure it here
-        # Clear cache because entries must be re-parsed with the new mapping
-        self.cache.clear()

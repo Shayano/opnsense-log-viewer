@@ -120,6 +120,42 @@ def test_filter_on_ready_cache_matches_direct_scan(loaded_vlm):
     assert loaded_vlm.get_total_entries() == 2
 
 
+def test_raw_view_pages_identical_before_and_after_cache(loaded_vlm):
+    stripped = [l for l in LINES]
+    before = [e.raw_line for e in loaded_vlm.get_entries(0, 10)]
+    assert before == stripped
+
+    _wait_for_cache(loaded_vlm)
+    after = [e.raw_line for e in loaded_vlm.get_entries(0, 10)]
+    assert after == before
+    assert loaded_vlm.total_is_exact
+    assert loaded_vlm.get_total_entries() == 4
+
+
+def test_unfiltered_pagination_served_by_cache(loaded_vlm):
+    _wait_for_cache(loaded_vlm)
+    full = [e.raw_line for e in loaded_vlm.get_entries(0, 10)]
+    assert [e.raw_line for e in loaded_vlm.get_entries(1, 2)] == full[1:3]
+    assert loaded_vlm.get_entries(4, 2) == []
+
+    # Filter then clear: the raw view (and its exact total) is restored.
+    lf = LogFilter()
+    lf.add_filter_condition("action", "==", "block")
+    loaded_vlm.apply_filter_duckdb(lf)
+    assert loaded_vlm.get_total_entries() == 2
+    loaded_vlm.clear_filter()
+    assert loaded_vlm.get_total_entries() == 4
+    assert [e.raw_line for e in loaded_vlm.get_entries(0, 10)] == full
+
+
+def test_raw_view_entries_carry_parsed_fields(loaded_vlm):
+    _wait_for_cache(loaded_vlm)
+    entries = loaded_vlm.get_entries(0, 10)
+    assert {e.get("action") for e in entries} == {"block", "pass"}
+    assert all(e.timestamp is not None for e in entries)
+    assert all(e.get("src", "").startswith("10.0.0.") for e in entries)
+
+
 def test_reload_same_file_reuses_cache(loaded_vlm, tmp_path):
     _wait_for_cache(loaded_vlm)
     # Re-loading the unchanged file finds the cache immediately: no rebuild.

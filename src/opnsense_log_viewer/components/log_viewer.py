@@ -23,8 +23,7 @@ from opnsense_log_viewer.utils.resource_utils import get_resource_path
 from opnsense_log_viewer.utils.file_utils import read_file_tail
 from opnsense_log_viewer.constants.app_constants import (
     DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, DEFAULT_PAGE_SIZE,
-    PAGE_SIZE_OPTIONS, VIRTUAL_LOG_CHUNK_SIZE, VIRTUAL_LOG_CACHE_SIZE,
-    TAIL_READ_LINES, SAFE_TAIL_THRESHOLD, LOG_TABLE_COLUMNS,
+    PAGE_SIZE_OPTIONS, TAIL_READ_LINES, LOG_TABLE_COLUMNS,
     COLUMN_WIDTHS, COLUMN_HEADERS, FIELD_MAPPING, FILTER_FIELD_OPTIONS,
     FILTER_OPERATOR_OPTIONS, FILTER_LOGIC_OPTIONS, TAG_COLOR_BLOCKED,
     TAG_COLOR_PASSED, DEFAULT_SSH_PORT, SSH_TIMEOUT, EXPORT_CHUNK_SIZE,
@@ -59,11 +58,7 @@ class LogViewerApp:
         self.log_parser = OPNsenseLogParser()
         self.config_parser = OPNsenseConfigParser()
         self.log_filter = LogFilter()
-        self.virtual_log_manager = VirtualLogManager(
-            chunk_size=VIRTUAL_LOG_CHUNK_SIZE,
-            cache_size=VIRTUAL_LOG_CACHE_SIZE,
-            log_parser=self.log_parser
-        )
+        self.virtual_log_manager = VirtualLogManager(log_parser=self.log_parser)
 
         # State variables
         self.displayed_entries = []
@@ -489,19 +484,14 @@ class LogViewerApp:
                                   f"• {len(ip_aliases)} IP aliases\n"
                                   f"• {len(port_aliases)} port aliases")
 
-                # Reload logs if already loaded to apply new mapping
+                # Refresh so already-displayed entries pick up the new mapping
+                # (the parser is shared with the manager; pages are re-fetched
+                # and re-enriched on every refresh).
                 if hasattr(self, 'virtual_log_manager') and self.virtual_log_manager.current_file:
-                    self.apply_interface_mapping()
                     self.refresh_display()
 
             except Exception as e:
                 messagebox.showerror("Error", f"Error loading configuration: {e}")
-
-    def apply_interface_mapping(self):
-        """Apply interface mapping to virtual manager"""
-        if hasattr(self, 'virtual_log_manager') and self.virtual_log_manager.current_file:
-            # Update virtual manager with new interface mapping
-            self.virtual_log_manager.set_interface_mapping(self.log_parser.interface_mapping)
 
     def load_logs_threaded(self):
         """Load logs using virtual manager (memory efficient)"""
@@ -565,17 +555,15 @@ class LogViewerApp:
         self.current_page = 0
         self.refresh_display()
 
-        # Show memory usage info (plus the DuckDB filter-cache state, whose
-        # background build was started by load_file)
-        memory_info = self.virtual_log_manager.get_memory_info()
+        # The exact count only exists once the one-time optimization is done;
+        # refresh_display already shows the moving frontier meanwhile.
         engine = getattr(self.virtual_log_manager, 'duckdb_engine', None)
         if engine is not None and engine.cache_ready:
-            cache_note = " | Filter cache ready"
+            self.status_bar.config(
+                text=f"Loaded {self.virtual_log_manager.get_total_entries():,} entries | Filter cache ready")
         elif engine is not None:
-            cache_note = " | Optimizing filter cache in background..."
-        else:
-            cache_note = ""
-        self.status_bar.config(text=f"Loaded {total_entries:,} entries (Memory-efficient mode: ~{memory_info['estimated_total_memory_mb']:.1f}MB){cache_note}")
+            self.status_bar.config(
+                text="File opened | Optimizing filter cache in background...")
 
     def on_load_error(self, error_message):
         """Called on loading error"""
@@ -592,40 +580,45 @@ class LogViewerApp:
         if getattr(self, 'using_fast_tail', False):
             self.using_fast_tail = False
 
-        # Use virtual manager for total count
-        if hasattr(self, 'virtual_log_manager') and self.virtual_log_manager.current_file:
-            total_entries = self.virtual_log_manager.get_total_entries()
-        else:
-            # Fallback when no file is loaded
-            total_entries = self.total_entries_count
+        has_file = (hasattr(self, 'virtual_log_manager')
+                    and self.virtual_log_manager.current_file)
 
-        # Calculate pagination - use correct formula
-        self.total_pages = max(1, (total_entries + self.page_size - 1) // self.page_size)
-
-        if self.current_page >= self.total_pages:
-            self.current_page = max(0, self.total_pages - 1)
-
-        # Get entries for current page using virtual manager
+        # Fetch the page FIRST: while the file is still being optimized the
+        # total is a moving frontier that this very fetch extends, so totals
+        # are computed after it.
         start_idx = self.current_page * self.page_size
-
         try:
-            if hasattr(self, 'virtual_log_manager') and self.virtual_log_manager.current_file:
-                # Use virtual manager (memory efficient)
-                # Calculate how many entries we can actually get
-                max_count = min(self.page_size, max(0, total_entries - start_idx))
-
-                if max_count > 0:
-                    self.displayed_entries = self.virtual_log_manager.get_entries(start_idx, max_count)
-                else:
-                    self.displayed_entries = []
+            if has_file:
+                self.displayed_entries = self.virtual_log_manager.get_entries(
+                    start_idx, self.page_size)
             else:
-                # No file loaded
                 self.displayed_entries = []
         except Exception as e:
             print(f"Error getting entries: {e}")
             import traceback
             traceback.print_exc()
             self.displayed_entries = []
+
+        if has_file:
+            total_entries = self.virtual_log_manager.get_total_entries()
+            total_is_exact = self.virtual_log_manager.total_is_exact
+        else:
+            total_entries = self.total_entries_count
+            total_is_exact = True
+
+        # Calculate pagination - use correct formula
+        self.total_pages = max(1, (total_entries + self.page_size - 1) // self.page_size)
+
+        # An empty page past the (now exact) end: clamp back and refetch once.
+        if (has_file and not self.displayed_entries and total_is_exact
+                and self.current_page >= self.total_pages and total_entries > 0):
+            self.current_page = max(0, self.total_pages - 1)
+            start_idx = self.current_page * self.page_size
+            try:
+                self.displayed_entries = self.virtual_log_manager.get_entries(
+                    start_idx, self.page_size)
+            except Exception:
+                self.displayed_entries = []
 
         # Clear table
         for item in self.log_tree.get_children():
@@ -667,8 +660,14 @@ class LogViewerApp:
         self.log_tree.tag_configure('blocked', background=TAG_COLOR_BLOCKED)
         self.log_tree.tag_configure('passed', background=TAG_COLOR_PASSED)
 
-        # Update pagination info
-        self.page_label.config(text=f"Page {self.current_page + 1} of {self.total_pages}")
+        # Update pagination info (the total is open-ended while the file is
+        # still being optimized: more pages appear as the scan advances)
+        if total_is_exact:
+            self.page_label.config(text=f"Page {self.current_page + 1} of {self.total_pages}")
+            total_text = f"{total_entries:,} total"
+        else:
+            self.page_label.config(text=f"Page {self.current_page + 1} of ...")
+            total_text = f"{total_entries:,}+ so far"
 
         # Update button states
         self._update_pagination_buttons()
@@ -677,7 +676,7 @@ class LogViewerApp:
         if (hasattr(self, 'virtual_log_manager') and self.virtual_log_manager.current_file
                 and self.virtual_log_manager.is_filtered):
             filter_status = " | Filtered"
-        self.status_bar.config(text=f"Showing {len(self.displayed_entries):,} entries (Page {self.current_page + 1}/{self.total_pages}) - {total_entries:,} total{filter_status}")
+        self.status_bar.config(text=f"Showing {len(self.displayed_entries):,} entries (Page {self.current_page + 1}/{self.total_pages}) - {total_text}{filter_status}")
 
     def _update_pagination_buttons(self):
         """Update pagination button states based on current page"""
@@ -685,11 +684,17 @@ class LogViewerApp:
             # Get real total entries to determine last accessible page
             if hasattr(self, 'virtual_log_manager') and self.virtual_log_manager.current_file:
                 total_entries = self.virtual_log_manager.get_total_entries()
+                total_is_exact = self.virtual_log_manager.total_is_exact
             else:
                 total_entries = self.total_entries_count
+                total_is_exact = True
 
-            # Calculate last accessible page
-            if total_entries > 0:
+            # Calculate last accessible page. While the total is still a
+            # moving frontier, keep Next/Last available: navigating extends
+            # the scan and reveals more pages.
+            if not total_is_exact:
+                last_page = self.current_page + 1
+            elif total_entries > 0:
                 last_page = max(0, ((total_entries - 1) // self.page_size))
             else:
                 last_page = 0
@@ -750,57 +755,47 @@ class LogViewerApp:
             self.refresh_display()
 
     def next_page(self):
-        """Go to next page - SAFE VERSION"""
+        """Go to next page"""
         if hasattr(self, 'virtual_log_manager') and self.virtual_log_manager.current_file:
             total_entries = self.virtual_log_manager.get_total_entries()
-            filtered = self.virtual_log_manager.is_filtered
+            total_is_exact = self.virtual_log_manager.total_is_exact
         else:
             total_entries = self.total_entries_count
-            filtered = False
+            total_is_exact = True
 
-        # When a filter is active, every page is served reliably by the engine's
-        # matches table, so advance to the true last page. The SAFE_TAIL_THRESHOLD
-        # clamp only exists to avoid the raw-file-tail parsing hazard on the
-        # unfiltered view.
-        if filtered:
+        # With an exact total (filtered view, or raw view once the file is
+        # optimized) every page is served reliably, so advance to the true last
+        # page. While the file is still being optimized the total is a moving
+        # frontier: advancing is what extends it, so never block it.
+        if total_is_exact:
             last_page = max(0, (total_entries - 1) // self.page_size)
-        else:
-            last_page = max(0, ((total_entries - SAFE_TAIL_THRESHOLD) // self.page_size))
-
-        if self.current_page < last_page:
-            self.current_page += 1
-            self.using_fast_tail = False
-            self.refresh_display()
-        elif not filtered:
-            # We're near the end - use Last button for final pages
-            if hasattr(self, 'status_bar'):
-                self.status_bar.config(text=f"Near end of file - use 'Last' button to see final entries")
+            if self.current_page >= last_page:
+                return
+        self.current_page += 1
+        self.using_fast_tail = False
+        self.refresh_display()
 
     def last_page(self):
-        """Go to end of file - ALWAYS use fast tail for safety"""
-        # When a filter is active, the "tail" must be the filtered tail, not the raw
-        # file tail. With the DuckDB engine the last filtered page is instant.
+        """Go to the last page"""
+        # With an exact total (filtered view, or raw view served by the
+        # optimized file) the true last page is one cheap query away.
         if (hasattr(self, 'virtual_log_manager') and self.virtual_log_manager.current_file
-                and self.virtual_log_manager.is_filtered):
+                and (self.virtual_log_manager.is_filtered
+                     or self.virtual_log_manager.total_is_exact)):
             total_entries = self.virtual_log_manager.get_total_entries()
             self.total_pages = max(1, (total_entries + self.page_size - 1) // self.page_size)
             self.current_page = max(0, self.total_pages - 1)
             self.using_fast_tail = False
             self.refresh_display()
             return
+        # File still being optimized: show the tail without scanning up to it.
         try:
             self._show_file_tail()
         except Exception as e:
             print(f"Error in last_page: {e}")
             import traceback
             traceback.print_exc()
-            # Fallback: go to a safe page
-            if hasattr(self, 'virtual_log_manager') and self.virtual_log_manager.current_file:
-                total_entries = self.virtual_log_manager.get_total_entries()
-                safe_page = max(0, ((total_entries - 2000) // self.page_size))
-                self.current_page = safe_page
-            else:
-                self.current_page = 0
+            self.current_page = 0
             self.refresh_display()
 
     def _show_file_tail(self):
@@ -1296,19 +1291,21 @@ class LogViewerApp:
                         all_filtered_entries.extend(chunk_entries)
 
                 else:
-                    # Export all entries
-                    total_chunks = (total_entries + 999) // 1000
-
-                    for chunk_id in range(total_chunks):
+                    # Export all entries: read until exhausted, because during
+                    # the one-time file optimization the total is still an
+                    # open-ended frontier.
+                    start_idx = 0
+                    while True:
                         if self.progress_dialog.cancelled:
                             return
 
-                        # Update progress
-                        current_entries = chunk_id * 1000
-                        self.progress_dialog.update_text(f"Retrieving data: {current_entries:,}/{total_entries:,} entries")
+                        self.progress_dialog.update_text(f"Retrieving data: {start_idx:,} entries")
 
-                        chunk_entries = self.virtual_log_manager.get_chunk(chunk_id)
+                        chunk_entries = self.virtual_log_manager.get_entries(start_idx, EXPORT_CHUNK_SIZE)
+                        if not chunk_entries:
+                            break
                         all_filtered_entries.extend(chunk_entries)
+                        start_idx += len(chunk_entries)
 
                 if self.progress_dialog.cancelled:
                     return

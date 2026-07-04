@@ -278,6 +278,7 @@ class DuckDBLogFilter:
         # report the source of the rows on screen, not the current cache state).
         self.last_used_cache = False
         self._closed = False
+        self._row_count: Optional[int] = None  # cached parquet num_rows
 
         # Parquet cache state. cache_ready flips to True either right here (a
         # previous run already converted this exact file) or when the background
@@ -734,6 +735,59 @@ class DuckDBLogFilter:
             os.remove(path)
         except OSError:
             pass
+
+    def row_count(self) -> Optional[int]:
+        """Exact number of valid entries in the Parquet cache (from its
+        metadata footer, instant); None while the cache is not usable."""
+        if not self._use_cache():
+            return None
+        if self._row_count is None:
+            try:
+                with self._lock:
+                    if self.con is None:
+                        return None
+                    p = self.parquet_path.replace("'", "''")
+                    row = self.con.execute(
+                        f"SELECT num_rows FROM parquet_file_metadata('{p}')"
+                    ).fetchone()
+                self._row_count = int(row[0])
+            except Exception:
+                return None
+        return self._row_count
+
+    def browse_page(self, start: int, count: int,
+                    interface_mapping: Optional[Dict[str, str]] = None
+                    ) -> Optional[List[LogEntry]]:
+        """Unfiltered raw-view page straight from the Parquet cache, in file
+        order (the conversion preserves the source row order). Returns None
+        when the cache is not usable, so the caller can fall back to reading
+        the raw file."""
+        if count <= 0 or start < 0:
+            return []
+        if not self._use_cache():
+            return None
+        mapping = (interface_mapping if interface_mapping is not None
+                   else self._interface_mapping)
+        cols = ", ".join(f'"{f}"' for f in _MATCH_FIELDS)
+        rel = (f"read_parquet('{self.parquet_path.replace(chr(39), chr(39) * 2)}', "
+               f"file_row_number=true)")
+        sql = (f"SELECT line, split_part(line, chr(9), 1) AS ts, {cols} "
+               f"FROM {rel} "
+               f"WHERE file_row_number >= ? AND file_row_number < ? "
+               f"ORDER BY file_row_number")
+        try:
+            with self._lock:
+                if self.con is None:
+                    return None
+                rows = self.con.execute(sql, [start, start + count]).fetchall()
+        except Exception as exc:
+            # Same recovery as build_matches: an unreadable cache mid-session
+            # must not take the raw view down with it.
+            logger.warning("Parquet cache unreadable while browsing: %s", exc)
+            self.cache_ready = False
+            self._cache_failed = True
+            return None
+        return [self._row_to_entry(r, mapping) for r in rows]
 
     def fetch_page(self, start: int, count: int,
                    interface_mapping: Optional[Dict[str, str]] = None

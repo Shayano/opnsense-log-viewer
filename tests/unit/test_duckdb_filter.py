@@ -248,6 +248,74 @@ def test_pagination_is_stable_and_disjoint(log_file, engine_mode, cache_dir):
         eng.close()
 
 
+# ----- Raw view: browse_page / row_count ---------------------------------------
+
+def _valid_lines(log_file):
+    parser = OPNsenseLogParser()
+    out = []
+    with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            if parser.parse_log_line(line.strip()):
+                out.append(line.strip())
+    return out
+
+
+def test_row_count_and_browse_need_the_cache(log_file, cache_dir):
+    eng = DuckDBLogFilter(log_file, cache_dir=cache_dir)
+    try:
+        assert eng.row_count() is None
+        assert eng.browse_page(0, 10) is None
+        eng.build_cache_sync()
+        assert eng.row_count() == 8
+        assert eng.browse_page(0, 10) is not None
+    finally:
+        eng.close()
+
+
+def test_browse_page_is_file_ordered_and_disjoint(log_file, cache_dir):
+    eng = DuckDBLogFilter(log_file, cache_dir=cache_dir)
+    try:
+        eng.build_cache_sync()
+        expected = _valid_lines(log_file)
+        total = eng.row_count()
+        assert total == len(expected)
+        got = []
+        for start in range(0, total, 3):
+            page = eng.browse_page(start, 3)
+            got.extend((e.raw_line or "").strip() for e in page)
+        assert got == expected
+        assert eng.browse_page(total, 5) == []
+    finally:
+        eng.close()
+
+
+def test_browse_page_resolves_interface_display(log_file, cache_dir):
+    eng = DuckDBLogFilter(log_file, cache_dir=cache_dir)
+    try:
+        eng.build_cache_sync()
+        page = eng.browse_page(0, 1, INTERFACE_MAPPING)
+        assert page[0].get("interface") == "igc0"
+        assert page[0].get("interface_display") == "WAN"
+    finally:
+        eng.close()
+
+
+def test_browse_disabled_when_source_changes_mid_session(log_file, cache_dir):
+    eng = DuckDBLogFilter(log_file, cache_dir=cache_dir)
+    try:
+        eng.build_cache_sync()
+        assert eng.browse_page(0, 2) is not None
+        with open(log_file, "a", encoding="utf-8", newline="\n") as f:
+            f.write(_v4("2024-01-15T11:00:00", "ridA", "igc0", "block", "in",
+                        "6", "10.0.0.9", "8.8.8.8", "1234", "80") + "\n")
+        # The frozen cache no longer matches the live file: the raw view must
+        # fall back (None), not serve a stale snapshot.
+        assert eng.browse_page(0, 2) is None
+        assert eng.row_count() is None
+    finally:
+        eng.close()
+
+
 # ----- Parquet cache lifecycle ------------------------------------------------
 
 def test_cache_reopen_is_instant(log_file, cache_dir):

@@ -127,8 +127,7 @@ def virtual_log_manager(tmp_path):
     The DuckDB Parquet cache is pointed at a per-test directory so tests never
     write to the user's real %LOCALAPPDATA% cache.
     """
-    return VirtualLogManager(chunk_size=100, cache_size=10,
-                             duckdb_cache_dir=str(tmp_path / "pq_cache"))
+    return VirtualLogManager(duckdb_cache_dir=str(tmp_path / "pq_cache"))
 
 
 # Sample data fixtures

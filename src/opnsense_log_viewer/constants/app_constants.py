@@ -10,16 +10,8 @@ DEFAULT_WINDOW_HEIGHT = 1000
 DEFAULT_PAGE_SIZE = 1000
 PAGE_SIZE_OPTIONS = ['100', '500', '1000', '2500', '5000']
 
-# Virtual Log Manager
-VIRTUAL_LOG_CHUNK_SIZE = 1000
-VIRTUAL_LOG_CACHE_SIZE = 50
-
 # File tail reading
 TAIL_READ_LINES = 2000
-TAIL_CHUNK_SIZE = 8192  # 8KB chunks for file reading
-
-# Safe navigation thresholds
-SAFE_TAIL_THRESHOLD = 1000  # Stay this many entries before end when using Next
 
 # Column configuration
 LOG_TABLE_COLUMNS = ('timestamp', 'action', 'interface', 'src', 'srcport', 'dst', 'dstport', 'proto', 'label')
