@@ -150,26 +150,25 @@ if filter_obj.matches(log_entry):
 ```python
 from opnsense_log_viewer.services.virtual_log_manager import VirtualLogManager
 
-manager = VirtualLogManager(chunk_size=1000, cache_size=50, log_parser=parser)
+manager = VirtualLogManager(log_parser=parser)
 
-# Load log file
-def progress_callback(message):
-    print(message)
+# Load log file: near-instant, no upfront scan. The one-time Parquet
+# conversion starts in the background right away.
+manager.load_file('firewall.log', progress_callback=print)
 
-manager.load_file('firewall.log', progress_callback)
-
-# Get entries
+# Get raw-view entries (lazy file reader until the cache is ready,
+# then straight from the Parquet cache)
 entries = manager.get_entries(start_index=0, count=100)
 
-# Apply filter
-manager.apply_filter(filter_function, progress_callback)
+# The unfiltered total is a moving frontier until the cache is ready:
+print(manager.total_entries, manager.total_is_exact)
 
-# Get filtered entries
+# Apply a filter (DuckDB engine, the only filtering path)
+manager.apply_filter_duckdb(log_filter, label_descriptions, print)
 filtered_entries = manager.get_entries(0, 100)
+print(manager.get_total_entries())  # match count while filtered
 
-# Get memory info
-info = manager.get_memory_info()
-print(f"Memory usage: {info['estimated_total_memory_mb']:.1f}MB")
+manager.clear_filter()
 ```
 
 #### SSH Client
@@ -194,33 +193,27 @@ if success:
     client.disconnect()
 ```
 
-#### Parallel Filter
+#### Engine Controller
 ```python
-from opnsense_log_viewer.services.parallel_filter import (
-    ParallelLogFilter, OptimizedFilterFunction,
-    get_cpu_count, get_max_parallel_workers
+from opnsense_log_viewer.services.engine_controller import (
+    CancellationToken, EngineController
 )
 
-# Check system capabilities
-cpu_count = get_cpu_count()
-max_workers = get_max_parallel_workers()
+# The controller owns the DuckDB engine lifecycle (VirtualLogManager
+# holds one as .engine_controller); open/ensure/close from any thread.
+controller = EngineController(cache_dir=None)  # None -> %LOCALAPPDATA%
+engine = controller.open('firewall.log')       # starts the cache build
 
-# Create optimized filter
-filter_func = OptimizedFilterFunction(
-    log_filter,
-    time_filter_enabled=True,
-    time_range_start=start_time,
-    time_range_end=end_time
-)
+# One token per operation; a Cancel button calls token.cancel()
+token = CancellationToken()
 
-# Apply filter in parallel
-parallel_filter = ParallelLogFilter()
-filtered_indices = parallel_filter.apply_filter_parallel(
-    virtual_log_manager,
-    filter_func,
-    progress_callback,
-    rule_labels_mapping=None
-)
+def on_progress(fraction):        # 0-1 float, or None while unknown
+    print(fraction)
+
+state = controller.wait_cache_ready(token=token, on_progress=on_progress)
+# state: 'ready' | 'failed' | 'closed' | 'cancelled' | 'unavailable'
+
+controller.close()
 ```
 
 ### Utils (`utils/`)
@@ -427,10 +420,11 @@ python -m opnsense_log_viewer
 ## Performance Considerations
 
 ### Memory Management
-- VirtualLogManager uses LRU cache
-- Default chunk size: 1000 entries
-- Default cache size: 50 chunks
-- Adjust in `constants/app_constants.py` if needed
+- Opening a file reads nothing upfront: no line-offset index is built (the old
+  Python index cost minutes and ~700 MB of offsets on a 14 GB file)
+- The raw view is served by the Parquet cache once ready; before that, a lazy
+  sequential reader (`SequentialRawView`) parses only as far as the user
+  actually browses, keeping one sparse offset per 1000 entries
 
 ### Filtering (DuckDB engine)
 - Filters are answered by `services/duckdb_filter.py` (`DuckDBLogFilter`), which
@@ -462,8 +456,12 @@ python -m opnsense_log_viewer
   atomically, validated at open, and pruned by age (14 days) and total size
   (20 GB). If the conversion fails the direct scan keeps working: the cache is
   an accelerator, never a prerequisite
-- A legacy in-memory parallel filter (`parallel_filter.py`) remains as a fallback
-  if DuckDB is unavailable
+- The cache also serves the RAW view: `browse_page` pages in file order via
+  `file_row_number` and `row_count` reads the exact total from the parquet
+  footer, both in milliseconds. The GUI's persistent progress row polls
+  `cache_building`/`cache_progress()` to show the one-time conversion advancing
+- The DuckDB engine is the only filtering path (the legacy in-memory parallel
+  filter was removed); if it fails, the error is surfaced to the user
 
 ### File I/O
 - Uses streaming for large files

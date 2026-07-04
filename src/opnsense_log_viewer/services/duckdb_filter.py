@@ -50,6 +50,11 @@ direct scan remains the fallback whenever the cache is unavailable for good
 Cache files are keyed by (schema version, canonical path, size, mtime) so any
 file change invalidates them, are written atomically (tmp + os.replace), and
 old ones are pruned by age and total size.
+
+The cache also backs the RAW (unfiltered) view: ``browse_page`` pages through
+it in file order via the ``file_row_number`` virtual column and ``row_count``
+reads the exact entry total from the parquet footer, both in milliseconds, so
+opening a file no longer needs any upfront scan of its own.
 """
 import hashlib
 import os
