@@ -153,19 +153,12 @@ class LogViewerApp:
         # Advanced filtering panel (moved out of Controls)
         self.advanced_filter_frame = self.setup_filter_panel(main_frame)
 
-        # Main notebook for tabs
-        notebook = ttk.Notebook(main_frame)
-        notebook.pack(fill=tk.BOTH, expand=True)
-
-        # Log table tab
-        self.setup_log_table_tab(notebook)
-
-        # Details tab
-        self.setup_details_tab(notebook)
-
         # Status bar (bottom-most), with the file-optimization row above it:
         # a small always-visible progress bar showing the one-time indexing
         # work, so the user is not left guessing until they apply a filter.
+        # Packed BEFORE the notebook: when vertical space runs out, Tk's packer
+        # squeezes the last-packed widget, and that must be the table, never
+        # these rows (they used to vanish until "Hide Menu" freed some room).
         self.status_bar = ttk.Label(main_frame, text="Ready", relief=tk.SUNKEN)
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
@@ -176,6 +169,16 @@ class LogViewerApp:
                                             maximum=100, length=240)
         self._optimize_visible = False
         self._optimize_poller_running = False
+
+        # Main notebook for tabs (packed last: it absorbs the squeeze)
+        notebook = ttk.Notebook(main_frame)
+        notebook.pack(fill=tk.BOTH, expand=True)
+
+        # Log table tab
+        self.setup_log_table_tab(notebook)
+
+        # Details tab
+        self.setup_details_tab(notebook)
 
     # ----- File-optimization progress (persistent, next to the status bar) ---
 
