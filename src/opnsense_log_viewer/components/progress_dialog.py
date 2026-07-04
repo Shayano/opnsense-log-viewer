@@ -44,6 +44,29 @@ class ProgressDialog:
         self.cancel_button.pack(pady=5)
 
         self.cancelled = False
+        self._determinate = False
+
+    def set_progress(self, fraction):
+        """Show real progress on the bar.
+
+        Args:
+            fraction: 0-1 completion, or None to revert to the indeterminate
+                pulse (progress unknown).
+        """
+        try:
+            if fraction is None:
+                if self._determinate:
+                    self.progress.config(mode='indeterminate')
+                    self.progress.start()
+                    self._determinate = False
+                return
+            if not self._determinate:
+                self.progress.stop()
+                self.progress.config(mode='determinate', maximum=100)
+                self._determinate = True
+            self.progress['value'] = max(0.0, min(100.0, fraction * 100))
+        except tk.TclError:
+            pass  # dialog already destroyed by a Cancel click
 
     def update_text(self, text):
         """

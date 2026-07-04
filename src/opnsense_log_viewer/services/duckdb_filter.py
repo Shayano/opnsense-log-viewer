@@ -575,7 +575,7 @@ class DuckDBLogFilter:
             return
         if self.cache_ready:
             if on_status:
-                on_status("Filter cache ready: filters are near-instant")
+                on_status("File ready - filtering is fast")
             return
         with self._cache_state_lock:
             if self._cache_thread is not None and self._cache_thread.is_alive():
@@ -588,16 +588,15 @@ class DuckDBLogFilter:
         # No status chatter once the engine is closed (file switched, app gone).
         try:
             if on_status and not self._closed:
-                on_status("Optimizing filter cache in background "
-                          "(one-time; filtering stays available meanwhile)...")
+                on_status("Optimizing the file in the background (one-time)...")
             self.build_cache_sync()
             if self.cache_ready and on_status and not self._closed:
-                on_status("Filter cache ready: filters are now near-instant")
+                on_status("File ready - filtering is now fast")
         except Exception as exc:
             self._cache_failed = True
             logger.warning("Parquet cache build failed (direct scan kept): %s", exc)
             if on_status and not self._closed:
-                on_status("Filter cache unavailable; keeping direct scan")
+                on_status("File optimization unavailable - filtering will be slower")
 
     def build_cache_sync(self) -> None:
         """Run the conversion in the calling thread (worker thread and tests).

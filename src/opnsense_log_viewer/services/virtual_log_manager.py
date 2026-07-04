@@ -196,9 +196,10 @@ class VirtualLogManager:
 
         if progress_callback:
             if engine.cache_ready:
-                progress_callback("Filtering with DuckDB (optimized cache)...")
+                progress_callback("Applying filter...")
             else:
-                progress_callback("Filtering with DuckDB (scanning file)...")
+                progress_callback("Applying filter (reading the whole file, "
+                                  "this can take a while)...")
 
         count = engine.build_matches(
             log_filter.expression,

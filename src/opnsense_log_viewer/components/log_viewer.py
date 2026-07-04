@@ -163,9 +163,73 @@ class LogViewerApp:
         # Details tab
         self.setup_details_tab(notebook)
 
-        # Status bar
+        # Status bar (bottom-most), with the file-optimization row above it:
+        # a small always-visible progress bar showing the one-time indexing
+        # work, so the user is not left guessing until they apply a filter.
         self.status_bar = ttk.Label(main_frame, text="Ready", relief=tk.SUNKEN)
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        self.optimize_frame = ttk.Frame(main_frame)
+        self.optimize_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        self.optimize_label = ttk.Label(self.optimize_frame, text="")
+        self.optimize_bar = ttk.Progressbar(self.optimize_frame, mode='determinate',
+                                            maximum=100, length=240)
+        self._optimize_visible = False
+        self._optimize_poller_running = False
+
+    # ----- File-optimization progress (persistent, next to the status bar) ---
+
+    def _show_optimize_row(self, fraction):
+        """Show/refresh the optimization progress row. ``fraction`` is the
+        0-1 completion, or None when still unknown (build just started)."""
+        if fraction is None:
+            self.optimize_label.config(text="Optimizing file for fast filtering (one-time)...")
+            self.optimize_bar['value'] = 0
+        else:
+            self.optimize_label.config(
+                text=f"Optimizing file for fast filtering (one-time): {fraction:.0%}")
+            self.optimize_bar['value'] = max(0.0, min(100.0, fraction * 100))
+        if not self._optimize_visible:
+            self.optimize_label.pack(side=tk.LEFT, padx=(5, 8), pady=2)
+            self.optimize_bar.pack(side=tk.LEFT, pady=2)
+            self._optimize_visible = True
+
+    def _hide_optimize_row(self):
+        if self._optimize_visible:
+            self.optimize_label.pack_forget()
+            self.optimize_bar.pack_forget()
+            self._optimize_visible = False
+
+    def _start_optimization_poller(self):
+        """(Re)start the periodic UI refresh of the optimization progress."""
+        if self._optimize_poller_running:
+            return
+        self._optimize_poller_running = True
+        self._poll_optimization_status()
+
+    def _poll_optimization_status(self):
+        engine = self.virtual_log_manager.duckdb_engine
+        if engine is None:
+            self._hide_optimize_row()
+            self._optimize_poller_running = False
+            return
+        if engine.cache_ready:
+            self._hide_optimize_row()
+            self._optimize_poller_running = False
+            # The exact total is known now: snap pagination/status to it.
+            self.refresh_display()
+            total = self.virtual_log_manager.total_entries
+            self.status_bar.config(
+                text=f"File ready: {total:,} entries - filtering is fast now")
+            return
+        if engine.cache_failed:
+            self._hide_optimize_row()
+            self._optimize_poller_running = False
+            self.status_bar.config(
+                text="File optimization unavailable - filtering will be slower")
+            return
+        self._show_optimize_row(engine.cache_progress())
+        self.root.after(700, self._poll_optimization_status)
 
     def setup_menu(self):
         """Setup main menu"""
@@ -512,19 +576,10 @@ class LogViewerApp:
                     if not load_token.cancelled:
                         load_dialog.update_text(message)
 
-                def cache_status_callback(message):
-                    # Called from the DuckDB cache build thread, possibly minutes
-                    # after loading finished -> route to the status bar via after().
-                    if load_token.cancelled:
-                        return
-                    try:
-                        self.root.after(0, lambda m=message: self.status_bar.config(text=m))
-                    except (RuntimeError, tk.TclError):
-                        pass  # window already destroyed
-
-                # Use virtual log manager for memory-efficient loading
+                # No cache-status callback: the persistent progress row polls
+                # the engine itself and is the single owner of that surface.
                 self.virtual_log_manager.load_file(
-                    self.current_log_file, progress_callback, cache_status_callback)
+                    self.current_log_file, progress_callback)
 
                 if load_token.cancelled:
                     # Stop the background cache conversion load_file just started
@@ -555,15 +610,17 @@ class LogViewerApp:
         self.current_page = 0
         self.refresh_display()
 
-        # The exact count only exists once the one-time optimization is done;
-        # refresh_display already shows the moving frontier meanwhile.
+        # The persistent progress row (and its poller) takes over from here:
+        # it shows the one-time optimization advancing and announces the exact
+        # total once the file is ready.
         engine = getattr(self.virtual_log_manager, 'duckdb_engine', None)
         if engine is not None and engine.cache_ready:
             self.status_bar.config(
-                text=f"Loaded {self.virtual_log_manager.get_total_entries():,} entries | Filter cache ready")
+                text=f"File ready: {self.virtual_log_manager.total_entries:,} entries - filtering is fast")
         elif engine is not None:
             self.status_bar.config(
-                text="File opened | Optimizing filter cache in background...")
+                text="File opened - optimizing in the background, you can start browsing")
+        self._start_optimization_poller()
 
     def on_load_error(self, error_message):
         """Called on loading error"""
@@ -834,7 +891,7 @@ class LogViewerApp:
 
             # Update status bar
             if hasattr(self, 'status_bar'):
-                self.status_bar.config(text=f"Showing last {len(self.displayed_entries)} entries (fast tail view) - Page {self.current_page + 1}/{total_pages}")
+                self.status_bar.config(text=f"Showing the last {len(self.displayed_entries)} entries (end of file)")
 
         except Exception as e:
             print(f"Error in _show_file_tail: {e}")
@@ -1107,14 +1164,20 @@ class LogViewerApp:
                     engine = None
 
                 def on_wait_progress(fraction):
+                    if filter_token.cancelled:
+                        return
+                    filter_dialog.set_progress(fraction)
                     if fraction is not None:
                         progress_callback(
-                            f"Optimizing filter cache (one-time)... {fraction:.0%}")
+                            f"Finishing the one-time file optimization... {fraction:.0%}")
                     else:
-                        progress_callback("Optimizing filter cache (one-time)...")
+                        progress_callback("Finishing the one-time file optimization...")
 
                 state = self.virtual_log_manager.engine_controller.wait_cache_ready(
                     token=filter_token, on_progress=on_wait_progress, engine=engine)
+                if not filter_token.cancelled:
+                    # Back to the indeterminate pulse for the filter itself.
+                    filter_dialog.set_progress(None)
                 if state == 'cancelled':
                     return
                 if state == 'closed':
