@@ -42,7 +42,6 @@ def test_apply_filter_duckdb_sets_count_and_entries(loaded_vlm):
     loaded_vlm.apply_filter_duckdb(lf)
 
     assert loaded_vlm.is_filtered is True
-    assert loaded_vlm.duckdb_filtered is True
     assert loaded_vlm.get_total_entries() == 2
 
     entries = loaded_vlm.get_entries(0, 10)
@@ -72,10 +71,9 @@ def test_clear_filter_resets_duckdb(loaded_vlm):
     lf = LogFilter()
     lf.add_filter_condition("action", "==", "block")
     loaded_vlm.apply_filter_duckdb(lf)
-    assert loaded_vlm.duckdb_filtered is True
+    assert loaded_vlm.is_filtered is True
 
     loaded_vlm.clear_filter()
-    assert loaded_vlm.duckdb_filtered is False
     assert loaded_vlm.is_filtered is False
     assert loaded_vlm.get_total_entries() == loaded_vlm.total_entries
 

@@ -204,33 +204,3 @@ class MemoryError(OPNsenseLogViewerError):
             full_message += f" (Requested: {memory_requested})"
 
         super().__init__(full_message)
-
-
-class MultiprocessingError(OPNsenseLogViewerError):
-    """
-    Exception raised for multiprocessing operation failures.
-
-    This includes errors during:
-    - Process pool creation
-    - Worker process failures
-    - Inter-process communication
-    - Serialization errors
-
-    Attributes:
-        worker_id: ID of the worker that failed (if applicable)
-        operation: Operation that failed
-        original_error: The underlying exception that was caught
-    """
-
-    def __init__(self, message, worker_id=None, operation=None, original_error=None):
-        self.worker_id = worker_id
-        self.operation = operation
-        self.original_error = original_error
-
-        full_message = message
-        if worker_id:
-            full_message += f" (Worker: {worker_id})"
-        if operation:
-            full_message += f" (Operation: {operation})"
-
-        super().__init__(full_message)

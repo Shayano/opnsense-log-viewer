@@ -10,8 +10,7 @@ from opnsense_log_viewer.exceptions import (
     SSHConnectionError,
     FilterError,
     ValidationError,
-    MemoryError as AppMemoryError,
-    MultiprocessingError
+    MemoryError as AppMemoryError
 )
 
 
@@ -43,8 +42,7 @@ class TestOPNsenseLogViewerError:
             SSHConnectionError("SSH error"),
             FilterError("Filter error"),
             ValidationError("Validation error"),
-            AppMemoryError("Memory error"),
-            MultiprocessingError("MP error")
+            AppMemoryError("Memory error")
         ]
 
         for exc in exceptions_to_test:
@@ -324,45 +322,6 @@ class TestMemoryError:
         assert "Cache allocation failed" in str(exc)
         assert "chunk_cache" in str(exc)
         assert "1GB" in str(exc)
-        assert exc.original_error is original_error
-
-
-@pytest.mark.unit
-class TestMultiprocessingError:
-    """Test MultiprocessingError class."""
-
-    def test_basic_error(self):
-        """Test basic multiprocessing error."""
-        exc = MultiprocessingError("Worker failed")
-        assert "Worker failed" in str(exc)
-
-    def test_error_with_worker_id(self):
-        """Test error with worker ID."""
-        exc = MultiprocessingError("Worker crashed", worker_id="worker-3")
-        assert "Worker crashed" in str(exc)
-        assert "worker-3" in str(exc)
-        assert exc.worker_id == "worker-3"
-
-    def test_error_with_operation(self):
-        """Test error with operation."""
-        exc = MultiprocessingError("Operation failed", operation="filter")
-        assert "Operation failed" in str(exc)
-        assert "filter" in str(exc)
-        assert exc.operation == "filter"
-
-    def test_error_with_all_attributes(self):
-        """Test error with all attributes."""
-        original_error = RuntimeError("Process terminated")
-        exc = MultiprocessingError(
-            "Worker process failed",
-            worker_id="worker-1",
-            operation="parallel_filter",
-            original_error=original_error
-        )
-
-        assert "Worker process failed" in str(exc)
-        assert "worker-1" in str(exc)
-        assert "parallel_filter" in str(exc)
         assert exc.original_error is original_error
 
 

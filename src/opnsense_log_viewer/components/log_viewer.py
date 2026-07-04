@@ -10,7 +10,6 @@ from datetime import datetime
 from typing import List, Optional
 import json
 import csv
-import types
 import re
 import ipaddress
 
@@ -19,7 +18,6 @@ from opnsense_log_viewer.services.config_parser import OPNsenseConfigParser
 from opnsense_log_viewer.services.log_filter import LogFilter
 from opnsense_log_viewer.services.virtual_log_manager import VirtualLogManager
 from opnsense_log_viewer.services.ssh_client import OPNsenseSSHClient, RuleLabelMapper
-from opnsense_log_viewer.services.parallel_filter import OptimizedFilterFunction, ParallelLogFilter, get_cpu_count, get_max_parallel_workers
 from opnsense_log_viewer.components.progress_dialog import ProgressDialog
 from opnsense_log_viewer.utils.resource_utils import get_resource_path
 from opnsense_log_viewer.utils.file_utils import read_file_tail
@@ -67,9 +65,6 @@ class LogViewerApp:
             log_parser=self.log_parser
         )
 
-        # Inject threaded methods immediately to avoid runtime issues
-        self._inject_threaded_methods()
-
         # State variables
         self.displayed_entries = []
         self.current_log_file = None
@@ -105,20 +100,6 @@ class LogViewerApp:
         self.rule_labels_loaded = False
 
         self.setup_ui()
-
-    def _inject_threaded_methods(self):
-        """Inject threaded methods into VirtualLogManager"""
-        from opnsense_log_viewer.services.virtual_log_manager import VirtualLogManager
-
-        if not hasattr(self.virtual_log_manager, '_apply_threaded_filter'):
-            self.virtual_log_manager._apply_threaded_filter = types.MethodType(
-                VirtualLogManager._apply_threaded_filter, self.virtual_log_manager
-            )
-
-        if not hasattr(self.virtual_log_manager, '_apply_sequential_filter'):
-            self.virtual_log_manager._apply_sequential_filter = types.MethodType(
-                VirtualLogManager._apply_sequential_filter, self.virtual_log_manager
-            )
 
     def setup_ui(self):
         """Setup the user interface"""
@@ -692,27 +673,11 @@ class LogViewerApp:
         # Update button states
         self._update_pagination_buttons()
 
-        # Show memory info if using virtual manager
-        if hasattr(self, 'virtual_log_manager') and self.virtual_log_manager.current_file:
-            memory_info = self.virtual_log_manager.get_memory_info()
-            cpu_count = get_cpu_count()
-            max_workers = get_max_parallel_workers()
-
-            filter_status = ""
-            if getattr(self.virtual_log_manager, 'duckdb_filtered', False):
-                engine = getattr(self.virtual_log_manager, 'duckdb_engine', None)
-                # Report the source of the CURRENTLY displayed matches, not the
-                # present cache state (the cache may have become ready since).
-                if engine is not None and getattr(engine, 'last_used_cache', False):
-                    filter_status = " | Filtered (DuckDB cache)"
-                else:
-                    filter_status = " | Filtered (DuckDB)"
-            elif self.virtual_log_manager.is_filtered:
-                filter_status = f" | Filtered with {max_workers} cores"
-
-            self.status_bar.config(text=f"Showing {len(self.displayed_entries):,} entries (Page {self.current_page + 1}/{self.total_pages}) - {total_entries:,} total (~{memory_info['estimated_total_memory_mb']:.1f}MB, {cpu_count} CPU cores){filter_status}")
-        else:
-            self.status_bar.config(text=f"Showing {len(self.displayed_entries):,} entries (Page {self.current_page + 1}/{self.total_pages}) - {total_entries:,} total")
+        filter_status = ""
+        if (hasattr(self, 'virtual_log_manager') and self.virtual_log_manager.current_file
+                and self.virtual_log_manager.is_filtered):
+            filter_status = " | Filtered"
+        self.status_bar.config(text=f"Showing {len(self.displayed_entries):,} entries (Page {self.current_page + 1}/{self.total_pages}) - {total_entries:,} total{filter_status}")
 
     def _update_pagination_buttons(self):
         """Update pagination button states based on current page"""
@@ -793,10 +758,10 @@ class LogViewerApp:
             total_entries = self.total_entries_count
             filtered = False
 
-        # When a filter is active, every page is served reliably (DuckDB matches /
-        # filtered_indices), so advance to the true last page. The SAFE_TAIL_THRESHOLD
-        # clamp only exists to avoid the raw-file-tail parsing hazard on the unfiltered
-        # view.
+        # When a filter is active, every page is served reliably by the engine's
+        # matches table, so advance to the true last page. The SAFE_TAIL_THRESHOLD
+        # clamp only exists to avoid the raw-file-tail parsing hazard on the
+        # unfiltered view.
         if filtered:
             last_page = max(0, (total_entries - 1) // self.page_size)
         else:
@@ -1118,24 +1083,6 @@ class LogViewerApp:
             self.refresh_display()
             return
 
-        # Create optimized filter function
-        # Check if Label filters are present
-        has_label_filters = any(
-            hasattr(condition, 'field') and condition.field == '__label__'
-            for condition in self.log_filter.expression.conditions
-        )
-
-        # Create filter function
-        combined_filter = OptimizedFilterFunction(
-            self.log_filter,
-            time_filter_enabled=self.time_filter_enabled.get(),
-            time_range_start=self.log_filter.time_range_start,
-            time_range_end=self.log_filter.time_range_end
-        )
-
-        # Allow multiprocessing
-        use_parallel = True
-
         # Show progress dialog for filtering
         self.progress_dialog = ProgressDialog(self.root, "Applying Filters")
 
@@ -1186,32 +1133,14 @@ class LogViewerApp:
                         self.root.after(0, self.on_filter_applied)
                         return
 
-                try:
-                    # Primary path: DuckDB fast engine. Pass the exact engine we
-                    # waited on so the filter cannot resolve a different one.
-                    self.virtual_log_manager.apply_filter_duckdb(
-                        self.log_filter, rule_labels_mapping, progress_callback,
-                        engine=engine
-                    )
-                except Exception as engine_error:
-                    # Never swallow silently: surface the reason (the old code hid a
-                    # broken fast path as a 20-minute "slow filter"), then fall back to
-                    # the legacy in-memory re-parse so the user still gets a result.
-                    import traceback
-                    traceback.print_exc()
-                    print(f"[filter] DuckDB engine failed, using fallback: {engine_error}")
-                    if progress_callback:
-                        progress_callback(f"Fast engine unavailable ({engine_error}); using fallback...")
-                    if use_parallel and has_label_filters:
-                        parallel_filter = ParallelLogFilter()
-                        filtered_indices = parallel_filter.apply_filter_parallel(
-                            self.virtual_log_manager, combined_filter, progress_callback,
-                            rule_labels_mapping or None
-                        )
-                        self.virtual_log_manager.filtered_indices = filtered_indices
-                        self.virtual_log_manager.is_filtered = True
-                    else:
-                        self.virtual_log_manager.apply_filter(combined_filter, progress_callback, use_parallel)
+                # Single filtering path: the DuckDB engine. Pass the exact engine
+                # we waited on so the filter cannot resolve a different one. On
+                # failure, surface the reason to the user instead of silently
+                # degrading into a minutes-long full re-parse.
+                self.virtual_log_manager.apply_filter_duckdb(
+                    self.log_filter, rule_labels_mapping, progress_callback,
+                    engine=engine
+                )
 
                 if not filter_dialog.cancelled:
                     # Update UI in main thread
@@ -1317,7 +1246,7 @@ class LogViewerApp:
             return
 
         # Check if there's data to export (get_total_entries covers both the
-        # DuckDB path, which has no filtered_indices, and the legacy path).
+        # filtered and the unfiltered view).
         total_entries = self.virtual_log_manager.get_total_entries()
         if total_entries == 0:
             messagebox.showwarning(
@@ -1351,8 +1280,8 @@ class LogViewerApp:
                 all_filtered_entries = []
 
                 if self.virtual_log_manager.is_filtered:
-                    # Export filtered entries. Use get_entries/get_total_entries so this
-                    # works for both the DuckDB engine and the legacy filtered_indices path.
+                    # Export filtered entries through get_entries/get_total_entries,
+                    # served by the engine's matches table.
                     total_filtered = self.virtual_log_manager.get_total_entries()
 
                     # Process in chunks with progress updates
